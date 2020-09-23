@@ -18,8 +18,11 @@ lazy_static! {
         None => [
             var("HOME").expect("No HOME env var defined"),
             ".config/jpre".to_string()
-        ].iter().collect()
-    }.join("jdks");
+        ]
+        .iter()
+        .collect(),
+    }
+    .join("jdks");
 }
 
 const FINISHED_MARKER: &str = ".jdk_marker";
@@ -52,34 +55,44 @@ pub fn get_jdk_path(major: u8) -> Result<PathBuf, Box<dyn Error>> {
         let status = response.status();
         let error = match response.text() {
             Ok(text) => text,
-            Err(err) => err.to_string()
+            Err(err) => err.to_string(),
         };
-        return Err(Box::from(format!("Failed to get JDK: {} ({})", status, error)));
+        return Err(Box::from(format!(
+            "Failed to get JDK: {} ({})",
+            status, error
+        )));
     }
 
-    let url = response.headers()
+    let url = response
+        .headers()
         .get(reqwest::header::CONTENT_DISPOSITION)
         .ok_or(Box::from("no content disposition"))
-        .and_then(|value| {
-            parse_filename(value.to_str()?)
-        })
+        .and_then(|value| parse_filename(value.to_str()?))
         .unwrap_or("<no filename>".to_string());
     eprintln!("Extracting {}", url);
     if path.exists() {
-        std::fs::remove_dir_all(&path).map_err(|e|
-            format!("Unable to clean JDK folder ({}): {}", path.display(), e)
-        )?;
+        std::fs::remove_dir_all(&path)
+            .map_err(|e| format!("Unable to clean JDK folder ({}): {}", path.display(), e))?;
     }
-    create_dir_all(&path).map_err(|e|
-        format!("Unable to create directories to JDK folder ({}): {}", path.display(), e)
-    )?;
+    create_dir_all(&path).map_err(|e| {
+        format!(
+            "Unable to create directories to JDK folder ({}): {}",
+            path.display(),
+            e
+        )
+    })?;
     let temporary_dir = TempDir::new_in(&*BASE_PATH, "jdk-download")?;
     finish_extract(&path, response, url, &temporary_dir)
         .and_then(|_| temporary_dir.close().map_err(|e| Box::from(e)))?;
     return Ok(path);
 }
 
-fn finish_extract(path: &PathBuf, response: Response, url: String, temporary_dir: &TempDir) -> Result<(), Box<dyn Error>> {
+fn finish_extract(
+    path: &PathBuf,
+    response: Response,
+    url: String,
+    temporary_dir: &TempDir,
+) -> Result<(), Box<dyn Error>> {
     if url.ends_with(".tar.gz") {
         unarchive_tar_gz(temporary_dir.path(), response)
     } else if url.ends_with(".zip") {
@@ -88,7 +101,9 @@ fn finish_extract(path: &PathBuf, response: Response, url: String, temporary_dir
         return Err(Box::from(format!("Don't know how to handle {}", url)));
     }
     eprintln!();
-    let dir_entries = temporary_dir.path().read_dir()?
+    let dir_entries = temporary_dir
+        .path()
+        .read_dir()?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, io::Error>>()?;
     let from_dir = if dir_entries.len() == 1 {
@@ -97,9 +112,8 @@ fn finish_extract(path: &PathBuf, response: Response, url: String, temporary_dir
         temporary_dir.path()
     };
 
-    std::fs::rename(from_dir, &path).map_err(|e|
-        format!("Unable to move to JDK folder ({}): {}", path.display(), e)
-    )?;
+    std::fs::rename(from_dir, &path)
+        .map_err(|e| format!("Unable to move to JDK folder ({}): {}", path.display(), e))?;
 
     File::create(path.join(FINISHED_MARKER))?;
     Ok(())
@@ -114,7 +128,8 @@ fn unarchive_tar_gz(path: &Path, mut response: Response) {
     for entry in archive.entries().unwrap() {
         let mut file = entry.unwrap();
         term.clear_line().unwrap();
-        term.write(format!("Extracting {}", file.path().unwrap().display()).as_bytes()).unwrap();
+        term.write(format!("Extracting {}", file.path().unwrap().display()).as_bytes())
+            .unwrap();
         file.unpack_in(path).unwrap();
     }
 }
@@ -125,14 +140,15 @@ fn unarchive_zip(path: &Path, mut response: Response) {
         let mut zip_file = match read_zipfile_from_stream(&mut response) {
             Ok(Some(entry)) => entry,
             Ok(None) => break,
-            Err(err) => panic!("Error reading zip: {}", err)
+            Err(err) => panic!("Error reading zip: {}", err),
         };
         let name = zip_file.name();
         if name.starts_with("/") || name.contains("..") {
             panic!("Illegal zip file name: {}", name);
         }
         term.clear_line().unwrap();
-        term.write(format!("Extracting {}", name).as_bytes()).unwrap();
+        term.write(format!("Extracting {}", name).as_bytes())
+            .unwrap();
         if zip_file.is_dir() {
             create_dir_all(zip_file.name()).unwrap();
             continue;
@@ -141,14 +157,14 @@ fn unarchive_zip(path: &Path, mut response: Response) {
             continue;
         }
         let mut options = OpenOptions::new();
-        options
-            .create(true)
-            .write(true);
-        #[cfg(unix)] {
+        options.create(true).write(true);
+        #[cfg(unix)]
+        {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(zip_file.unix_mode().unwrap_or(0o666));
         }
-        let mut file = options.open(path.join(zip_file.name()))
+        let mut file = options
+            .open(path.join(zip_file.name()))
             .expect("Failed to open file");
         io::copy(&mut zip_file, &mut file).expect("Unable to copy to file");
     }

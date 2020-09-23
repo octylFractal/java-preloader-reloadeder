@@ -32,7 +32,8 @@ pub fn parse_filename(header: &str) -> Result<String, Box<dyn Error>> {
 }
 lazy_static! {
     static ref TOKEN_RE: Regex = Regex::new("^[!#$%&'*+.0-9A-Z^_`a-z|~-]+$").unwrap();
-    static ref QUOTED_TEXT_RE: Regex = Regex::new("^([^\x00-\x1F\x7F\"]|[\r\n\t ]|\\\")+$").unwrap();
+    static ref QUOTED_TEXT_RE: Regex =
+        Regex::new("^([^\x00-\x1F\x7F\"]|[\r\n\t ]|\\\")+$").unwrap();
 }
 
 // A REALLY BAD content-disposition parser
@@ -47,7 +48,7 @@ fn parse_filename_value(value: &str) -> Result<String, Box<dyn Error>> {
     }
     let trimmed = &value[1..value.len()];
     if !QUOTED_TEXT_RE.is_match(trimmed) {
-        return Err(Box::from("Quoted filename doesn't match TEXT regex"))
+        return Err(Box::from("Quoted filename doesn't match TEXT regex"));
     }
     return Ok(value.replace("\\\"", "\""));
 }
