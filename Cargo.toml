@@ -1,7 +1,14 @@
 [package]
 name = "jpre"
+description = "A JDK management tool"
+keywords = ["java", "jdk"]
+categories = ["command-line-utilities", "development-tools::build-utils"]
 version = "0.1.0"
 authors = ["Octavia Togami <octavia.togami@gmail.com>"]
+license = "GPL-3.0-or-later"
+license-file = "LICENSE.txt"
+readme = "README.md"
+repository = "https://github.com/octylFractal/java-preloader-reloadeder"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
