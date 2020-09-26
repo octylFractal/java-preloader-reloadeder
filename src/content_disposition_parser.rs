@@ -1,5 +1,6 @@
-use regex::Regex;
 use std::error::Error;
+
+use regex::Regex;
 
 const FILENAME: &str = "filename=";
 const FILENAME_EXT: &str = "filename*=";

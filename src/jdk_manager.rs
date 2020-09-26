@@ -5,12 +5,16 @@ use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use config::Source;
 use console::Term;
+use log::debug;
 use reqwest::blocking::Response;
 use tempdir::TempDir;
 use zip::read::read_zipfile_from_stream;
 
+use crate::adoptjdk;
 use crate::content_disposition_parser::parse_filename;
+use crate::reqwest_failure::handle_response_fail;
 
 lazy_static! {
     static ref BASE_PATH: PathBuf = match var_os("XDG_CONFIG_HOME") {
@@ -27,17 +31,59 @@ lazy_static! {
 
 const FINISHED_MARKER: &str = ".jdk_marker";
 
-fn get_jdk_url(major: u8) -> String {
-    return format!(
-        "https://api.adoptopenjdk.net/v3/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/adoptopenjdk?project=jdk",
-        major,
-        std::env::consts::OS,
-        match std::env::consts::ARCH {
-            "x86" => "x86",
-            "x86_64" => "x64",
-            unknown => panic!("Unknown ARCH {}", unknown)
-        },
-    );
+pub fn get_jdk_version(major: u8) -> Option<String> {
+    let path = BASE_PATH.join(major.to_string());
+    if !path.join(FINISHED_MARKER).exists() {
+        debug!("No finished marker exists in JDK {}", major);
+        return None;
+    }
+    let release = path.join("release");
+    if !path.join("release").exists() {
+        debug!("No release file exists in JDK {}", major);
+        return None;
+    }
+    let config = config::File::from(release)
+        .format(config::FileFormat::Toml)
+        .collect()
+        .ok()?;
+    return config
+        .get("JAVA_VERSION")
+        .and_then(|v| v.clone().into_str().ok());
+}
+
+pub fn get_all_jdk_majors() -> Result<Vec<u8>, Box<dyn Error>> {
+    return BASE_PATH
+        .read_dir()?
+        .map(|res| {
+            res.map(|e| {
+                e.path()
+                    .file_name()
+                    // This should be impossible
+                    .expect("cannot be missing file name")
+                    .to_str()
+                    // I don't really know if I should handle non-UTF-8
+                    .unwrap()
+                    .to_string()
+            })
+        })
+        .filter_map(|res| {
+            match res {
+                // map the parse error to None, otherwise get Some(Ok(u8))
+                Ok(file_name) => file_name.parse::<u8>().ok().map(Ok),
+                // map the actual errors back in
+                Err(err) => Some(Err(Box::<dyn Error>::from(err))),
+            }
+        })
+        .collect();
+}
+
+pub fn map_available_jdk_versions(majors: Vec<u8>) -> Vec<(u8, String)> {
+    let mut vec: Vec<(u8, String)> = majors
+        .iter()
+        .filter_map(|jdk_major| get_jdk_version(*jdk_major).map(|version| (*jdk_major, version)))
+        .collect();
+    vec.sort_by_key(|v| v.0);
+    return vec;
 }
 
 pub fn get_jdk_path(major: u8) -> Result<PathBuf, Box<dyn Error>> {
@@ -46,21 +92,15 @@ pub fn get_jdk_path(major: u8) -> Result<PathBuf, Box<dyn Error>> {
         return Ok(path);
     }
 
-    let response = reqwest::blocking::ClientBuilder::default()
-        .connection_verbose(true)
-        .build()?
-        .get(&get_jdk_url(major))
-        .send()?;
+    update_jdk(major)?;
+    return Ok(path);
+}
+
+pub fn update_jdk(major: u8) -> Result<(), Box<dyn Error>> {
+    let path = BASE_PATH.join(major.to_string());
+    let response = adoptjdk::get_latest_jdk_binary(major)?;
     if !response.status().is_success() {
-        let status = response.status();
-        let error = match response.text() {
-            Ok(text) => text,
-            Err(err) => err.to_string(),
-        };
-        return Err(Box::from(format!(
-            "Failed to get JDK: {} ({})",
-            status, error
-        )));
+        return Err(handle_response_fail(response, "Failed to get JDK binary"));
     }
 
     let url = response
@@ -84,7 +124,7 @@ pub fn get_jdk_path(major: u8) -> Result<PathBuf, Box<dyn Error>> {
     let temporary_dir = TempDir::new_in(&*BASE_PATH, "jdk-download")?;
     finish_extract(&path, response, url, &temporary_dir)
         .and_then(|_| temporary_dir.close().map_err(|e| Box::from(e)))?;
-    return Ok(path);
+    return Ok(());
 }
 
 fn finish_extract(
