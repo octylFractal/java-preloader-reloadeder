@@ -37,6 +37,8 @@ enum Subcommand {
     },
     #[structopt(about = "List downloaded JDKs")]
     List {},
+    #[structopt(about = "Print currently active JDK version (full)")]
+    Current {},
 }
 
 type JdkOrAll = Either<u8, ()>;
@@ -51,13 +53,18 @@ fn parse_jdk_or_all(s: &str) -> Result<JdkOrAll, String> {
     })
 }
 
+const CURRENT_ENV_VAR: &str = "JPRE_JAVA_VERSION";
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Jpre::from_args();
     stderrlog::new().verbosity(args.verbose).init()?;
     match args.cmd {
         Subcommand::Use { jdk } => {
             let path = jdk_manager::get_jdk_path(jdk)?;
-            println!("JAVA_HOME={}", path.canonicalize()?.display())
+            let jdk_version = jdk_manager::get_jdk_version(jdk)
+                .ok_or(Box::<dyn Error>::from("Unable to get current JDK version"))?;
+            println!("export JAVA_HOME={}", path.canonicalize()?.display());
+            println!("export {}={}", CURRENT_ENV_VAR, jdk_version);
         }
         Subcommand::Update { check, jdk } => {
             let majors = jdk.either(
@@ -87,6 +94,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             for (major, version) in versions {
                 println!("{}: {}", major, version);
             }
+        }
+        Subcommand::Current {} => {
+            let jdk_version = std::env::var(CURRENT_ENV_VAR)
+                .unwrap_or_else(|_| "".to_string());
+            println!("{}", jdk_version);
         }
     };
     Ok(())
