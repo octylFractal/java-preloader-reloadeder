@@ -6,6 +6,7 @@ use either::Either;
 use structopt::StructOpt;
 
 use crate::config::Configuration;
+use std::process::exit;
 
 mod adoptjdk;
 mod config;
@@ -16,8 +17,10 @@ mod reqwest_failure;
 #[derive(StructOpt)]
 #[structopt(name = "jpre", about = "A JDK management tool")]
 struct Jpre {
-    #[structopt(short = "v", long = "verbose", parse(from_occurrences))]
+    #[structopt(short, long, parse(from_occurrences))]
     verbose: usize,
+    #[structopt(long, hidden = true)]
+    shell_integration: bool,
     #[structopt(subcommand)]
     cmd: Subcommand,
 }
@@ -90,14 +93,21 @@ fn load_jdk_list(config: &Configuration, jdk: String) -> Result<Vec<u8>> {
 const CURRENT_ENV_VAR: &str = "JPRE_JAVA_VERSION";
 
 fn main() {
-    if let Err(error) = main_for_result() {
+    let args: Jpre = Jpre::from_args();
+    let in_shell = args.shell_integration;
+    if let Err(error) = main_for_result(args) {
+        // Force the errors to print in color if we're in the integration
+        // Otherwise colored thinks we're not in a TTY, but error is!
+        if in_shell {
+            colored::control::set_override(true);
+        }
         eprintln!("{}", format!("Error: {:?}", error).red());
+        exit(1);
     }
 }
 
-fn main_for_result() -> Result<()> {
+fn main_for_result(args: Jpre) -> Result<()> {
     let mut config = Configuration::new()?;
-    let args = Jpre::from_args();
     stderrlog::new().verbosity(args.verbose).init()?;
     match args.cmd {
         Subcommand::Use { jdk } => {
