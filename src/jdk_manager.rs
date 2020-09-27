@@ -95,7 +95,7 @@ pub fn update_jdk(major: u8) -> Result<()> {
 
     let url = response
         .headers()
-        .get("Content-Disposition")
+        .get(attohttpc::header::CONTENT_DISPOSITION)
         .ok_or_else(|| anyhow!("no content disposition"))
         .and_then(|value| parse_filename(value.to_str()?))?;
     eprintln!("Extracting {}", url);
