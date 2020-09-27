@@ -1,5 +1,7 @@
 java-preloader-reloadeder
 =========================
+[![Crates.io](https://img.shields.io/crates/v/jpre?style=flat-square)](https://crates.io/crates/jpre)
+
 Replacement for my old [gist](https://gist.github.com/octylFractal/d85e0b160d8be75dbca29910a2b34f34).
 
 Downloads JDKs from AdoptOpenJDK into `$XDG_CONFIG_HOME/jpre/jdks`, then
