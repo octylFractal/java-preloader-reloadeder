@@ -14,7 +14,7 @@ edition = "2018"
 
 [dependencies]
 structopt = "0.3.18"
-reqwest = { version = "0.10.8", features = ["blocking", "json"] }
+attohttpc = { version = "0.15.0", default-features = false, features = ["json", "tls"] }
 zip = "0.5.8"
 tar = "0.4.30"
 libflate = "1.0.2"

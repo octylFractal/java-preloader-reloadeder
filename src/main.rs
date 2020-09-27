@@ -12,7 +12,7 @@ mod adoptjdk;
 mod config;
 mod content_disposition_parser;
 mod jdk_manager;
-mod reqwest_failure;
+mod http_failure;
 
 #[derive(StructOpt)]
 #[structopt(name = "jpre", about = "A JDK management tool")]

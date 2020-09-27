@@ -1,16 +1,9 @@
 use serde::Deserialize;
 
-use crate::reqwest_failure::handle_response_fail;
+use crate::http_failure::handle_response_fail;
 use anyhow::{anyhow, Context, Result};
-use once_cell::sync::Lazy;
 
 const BASE_URL: &str = "https://api.adoptopenjdk.net/v3";
-static HTTP_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
-    reqwest::blocking::ClientBuilder::default()
-        .connection_verbose(true)
-        .build()
-        .expect("Unable to build reqwest client")
-});
 
 fn get_jdk_url(major: u8) -> Result<String> {
     let arch = match std::env::consts::ARCH {
@@ -27,11 +20,8 @@ fn get_jdk_url(major: u8) -> Result<String> {
     ));
 }
 
-pub fn get_latest_jdk_binary(major: u8) -> Result<reqwest::blocking::Response> {
-    return Ok(HTTP_CLIENT
-        .get(&get_jdk_url(major)?)
-        .send()
-        .context("Failed to get latest binary from Adopt API")?);
+pub fn get_latest_jdk_binary(major: u8) -> Result<attohttpc::Response> {
+    attohttpc::get(&get_jdk_url(major)?).send().context("Failed to get latest JDK binary")
 }
 
 fn get_latest_jdk_version_url(major: u8) -> String {
@@ -62,11 +52,9 @@ struct JdkVersion {
 }
 
 pub fn get_latest_jdk_version(major: u8) -> Result<String> {
-    let response = HTTP_CLIENT
-        .get(&get_latest_jdk_version_url(major))
-        .send()
-        .context("Failed to get latest JDK version from Adopt API")?;
-    if !response.status().is_success() {
+    let response = attohttpc::get(&get_latest_jdk_version_url(major)).send()
+        .context("Failed to get latest JDK version")?;
+    if !response.is_success() {
         return Err(handle_response_fail(
             response,
             "Failed to get latest JDK version",

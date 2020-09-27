@@ -1,6 +1,6 @@
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
-use std::io::Write;
+use std::io::{Write, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -8,13 +8,12 @@ use config::Source;
 use console::Term;
 use log::debug;
 use once_cell::sync::Lazy;
-use reqwest::blocking::Response;
 use tempdir::TempDir;
 use zip::read::read_zipfile_from_stream;
 
 use crate::adoptjdk;
 use crate::content_disposition_parser::parse_filename;
-use crate::reqwest_failure::handle_response_fail;
+use crate::http_failure::handle_response_fail;
 
 static BASE_PATH: Lazy<PathBuf> = Lazy::new(|| crate::config::APP_HOME.join("jdks"));
 
@@ -90,16 +89,15 @@ pub fn get_jdk_path(major: u8) -> Result<PathBuf> {
 pub fn update_jdk(major: u8) -> Result<()> {
     let path = BASE_PATH.join(major.to_string());
     let response = adoptjdk::get_latest_jdk_binary(major)?;
-    if !response.status().is_success() {
+    if !response.is_success() {
         return Err(handle_response_fail(response, "Failed to get JDK binary"));
     }
 
     let url = response
         .headers()
-        .get(reqwest::header::CONTENT_DISPOSITION)
+        .get("Content-Disposition")
         .ok_or_else(|| anyhow!("no content disposition"))
-        .and_then(|value| parse_filename(value.to_str()?))
-        .unwrap_or("<no filename>".to_string());
+        .and_then(|value| parse_filename(value.to_str()?))?;
     eprintln!("Extracting {}", url);
     if path.exists() {
         std::fs::remove_dir_all(&path)
@@ -120,14 +118,14 @@ pub fn update_jdk(major: u8) -> Result<()> {
 
 fn finish_extract(
     path: &PathBuf,
-    response: Response,
+    response: attohttpc::Response,
     url: String,
     temporary_dir: &TempDir,
 ) -> Result<()> {
     if url.ends_with(".tar.gz") {
-        unarchive_tar_gz(temporary_dir.path(), response)
+        unarchive_tar_gz(temporary_dir.path(), response.split().2)
     } else if url.ends_with(".zip") {
-        unarchive_zip(temporary_dir.path(), response)
+        unarchive_zip(temporary_dir.path(), response.split().2)
     } else {
         return Err(anyhow!("Don't know how to handle {}", url));
     }
@@ -152,9 +150,9 @@ fn finish_extract(
     Ok(())
 }
 
-fn unarchive_tar_gz(path: &Path, mut response: Response) {
+fn unarchive_tar_gz(path: &Path, mut reader: impl Read) {
     let mut term = Term::stderr();
-    let gz_decode = libflate::gzip::Decoder::new(&mut response).unwrap();
+    let gz_decode = libflate::gzip::Decoder::new(&mut reader).unwrap();
     let mut archive = tar::Archive::new(gz_decode);
     archive.set_preserve_permissions(true);
     archive.set_overwrite(true);
@@ -167,10 +165,10 @@ fn unarchive_tar_gz(path: &Path, mut response: Response) {
     }
 }
 
-fn unarchive_zip(path: &Path, mut response: Response) {
+fn unarchive_zip(path: &Path, mut reader: impl Read) {
     let mut term = Term::stderr();
     loop {
-        let mut zip_file = match read_zipfile_from_stream(&mut response) {
+        let mut zip_file = match read_zipfile_from_stream(&mut reader) {
             Ok(Some(entry)) => entry,
             Ok(None) => break,
             Err(err) => panic!("Error reading zip: {}", err),
