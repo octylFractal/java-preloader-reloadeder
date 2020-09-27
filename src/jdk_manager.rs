@@ -1,13 +1,13 @@
-use std::env::{var, var_os};
-use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use anyhow::{anyhow, Result, Context};
 use config::Source;
 use console::Term;
 use log::debug;
+use once_cell::sync::Lazy;
 use reqwest::blocking::Response;
 use tempdir::TempDir;
 use zip::read::read_zipfile_from_stream;
@@ -16,18 +16,7 @@ use crate::adoptjdk;
 use crate::content_disposition_parser::parse_filename;
 use crate::reqwest_failure::handle_response_fail;
 
-lazy_static! {
-    static ref BASE_PATH: PathBuf = match var_os("XDG_CONFIG_HOME") {
-        Some(val) => PathBuf::from(val),
-        None => [
-            var("HOME").expect("No HOME env var defined"),
-            ".config/jpre".to_string()
-        ]
-        .iter()
-        .collect(),
-    }
-    .join("jdks");
-}
+static BASE_PATH: Lazy<PathBuf> = Lazy::new(|| crate::config::APP_HOME.join("jdks"));
 
 const FINISHED_MARKER: &str = ".jdk_marker";
 
@@ -51,33 +40,35 @@ pub fn get_jdk_version(major: u8) -> Option<String> {
         .and_then(|v| v.clone().into_str().ok());
 }
 
-pub fn get_all_jdk_majors() -> Result<Vec<u8>, Box<dyn Error>> {
+pub fn get_all_jdk_majors() -> Result<Vec<u8>> {
     return BASE_PATH
-        .read_dir()?
+        .read_dir().context("Failed to read base directory")?
         .map(|res| {
-            res.map(|e| {
-                e.path()
-                    .file_name()
-                    // This should be impossible
-                    .expect("cannot be missing file name")
-                    .to_str()
-                    // I don't really know if I should handle non-UTF-8
-                    .unwrap()
-                    .to_string()
-            })
+            res
+                .map(|e| {
+                    e.path()
+                        .file_name()
+                        // This should be impossible
+                        .expect("cannot be missing file name")
+                        .to_str()
+                        // I don't really know if I should handle non-UTF-8
+                        .expect("Non-UTF8 filename encountered")
+                        .to_string()
+                })
+                .context("Failed to read directory entry")
         })
         .filter_map(|res| {
             match res {
                 // map the parse error to None, otherwise get Some(Ok(u8))
                 Ok(file_name) => file_name.parse::<u8>().ok().map(Ok),
                 // map the actual errors back in
-                Err(err) => Some(Err(Box::<dyn Error>::from(err))),
+                Err(err) => Some(Err(err)),
             }
         })
         .collect();
 }
 
-pub fn map_available_jdk_versions(majors: Vec<u8>) -> Vec<(u8, String)> {
+pub fn map_available_jdk_versions(majors: &Vec<u8>) -> Vec<(u8, String)> {
     let mut vec: Vec<(u8, String)> = majors
         .iter()
         .filter_map(|jdk_major| get_jdk_version(*jdk_major).map(|version| (*jdk_major, version)))
@@ -86,7 +77,7 @@ pub fn map_available_jdk_versions(majors: Vec<u8>) -> Vec<(u8, String)> {
     return vec;
 }
 
-pub fn get_jdk_path(major: u8) -> Result<PathBuf, Box<dyn Error>> {
+pub fn get_jdk_path(major: u8) -> Result<PathBuf> {
     let path = BASE_PATH.join(major.to_string());
     if path.join(FINISHED_MARKER).exists() {
         return Ok(path);
@@ -96,7 +87,7 @@ pub fn get_jdk_path(major: u8) -> Result<PathBuf, Box<dyn Error>> {
     return Ok(path);
 }
 
-pub fn update_jdk(major: u8) -> Result<(), Box<dyn Error>> {
+pub fn update_jdk(major: u8) -> Result<()> {
     let path = BASE_PATH.join(major.to_string());
     let response = adoptjdk::get_latest_jdk_binary(major)?;
     if !response.status().is_success() {
@@ -106,24 +97,22 @@ pub fn update_jdk(major: u8) -> Result<(), Box<dyn Error>> {
     let url = response
         .headers()
         .get(reqwest::header::CONTENT_DISPOSITION)
-        .ok_or(Box::from("no content disposition"))
+        .ok_or_else(|| anyhow!("no content disposition"))
         .and_then(|value| parse_filename(value.to_str()?))
         .unwrap_or("<no filename>".to_string());
     eprintln!("Extracting {}", url);
     if path.exists() {
         std::fs::remove_dir_all(&path)
-            .map_err(|e| format!("Unable to clean JDK folder ({}): {}", path.display(), e))?;
+            .with_context(|| format!("Unable to clean JDK folder ({})", path.display()))?;
     }
-    create_dir_all(&path).map_err(|e| {
-        format!(
-            "Unable to create directories to JDK folder ({}): {}",
-            path.display(),
-            e
-        )
-    })?;
-    let temporary_dir = TempDir::new_in(&*BASE_PATH, "jdk-download")?;
+    create_dir_all(&path)
+        .with_context(||
+            format!("Unable to create directories to JDK folder ({})", path.display())
+        )?;
+    let temporary_dir = TempDir::new_in(&*BASE_PATH, "jdk-download")
+        .context("Failed to create temporary directory")?;
     finish_extract(&path, response, url, &temporary_dir)
-        .and_then(|_| temporary_dir.close().map_err(|e| Box::from(e)))?;
+        .and_then(|_| temporary_dir.close().context("Failed to cleanup temp dir"))?;
     return Ok(());
 }
 
@@ -132,20 +121,21 @@ fn finish_extract(
     response: Response,
     url: String,
     temporary_dir: &TempDir,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     if url.ends_with(".tar.gz") {
         unarchive_tar_gz(temporary_dir.path(), response)
     } else if url.ends_with(".zip") {
         unarchive_zip(temporary_dir.path(), response)
     } else {
-        return Err(Box::from(format!("Don't know how to handle {}", url)));
+        return Err(anyhow!("Don't know how to handle {}", url));
     }
     eprintln!();
     let dir_entries = temporary_dir
         .path()
-        .read_dir()?
+        .read_dir().context("Failed to read temp dir")?
         .map(|res| res.map(|e| e.path()))
-        .collect::<Result<Vec<_>, io::Error>>()?;
+        .collect::<Result<Vec<_>, io::Error>>()
+        .context("Failed to read temp dir entry")?;
     let from_dir = if dir_entries.len() == 1 {
         &dir_entries[0]
     } else {
@@ -153,9 +143,9 @@ fn finish_extract(
     };
 
     std::fs::rename(from_dir, &path)
-        .map_err(|e| format!("Unable to move to JDK folder ({}): {}", path.display(), e))?;
+        .with_context(|| format!("Unable to move to JDK folder ({})", path.display()))?;
 
-    File::create(path.join(FINISHED_MARKER))?;
+    File::create(path.join(FINISHED_MARKER)).context("Unable to create marker")?;
     Ok(())
 }
 
@@ -199,10 +189,10 @@ fn unarchive_zip(path: &Path, mut response: Response) {
         let mut options = OpenOptions::new();
         options.create(true).write(true);
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(zip_file.unix_mode().unwrap_or(0o666));
-        }
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(zip_file.unix_mode().unwrap_or(0o666));
+            }
         let mut file = options
             .open(path.join(zip_file.name()))
             .expect("Failed to open file");
