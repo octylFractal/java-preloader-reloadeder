@@ -1,16 +1,16 @@
 use serde::Deserialize;
 
-use anyhow::{anyhow, Result, Context};
 use crate::reqwest_failure::handle_response_fail;
+use anyhow::{anyhow, Context, Result};
 use once_cell::sync::Lazy;
 
 const BASE_URL: &str = "https://api.adoptopenjdk.net/v3";
-static HTTP_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(||
+static HTTP_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
     reqwest::blocking::ClientBuilder::default()
         .connection_verbose(true)
         .build()
         .expect("Unable to build reqwest client")
-);
+});
 
 fn get_jdk_url(major: u8) -> Result<String> {
     let arch = match std::env::consts::ARCH {
@@ -28,10 +28,10 @@ fn get_jdk_url(major: u8) -> Result<String> {
 }
 
 pub fn get_latest_jdk_binary(major: u8) -> Result<reqwest::blocking::Response> {
-    return Ok(
-        HTTP_CLIENT.get(&get_jdk_url(major)?).send()
-            .context("Failed to get latest binary from Adopt API")?
-    );
+    return Ok(HTTP_CLIENT
+        .get(&get_jdk_url(major)?)
+        .send()
+        .context("Failed to get latest binary from Adopt API")?);
 }
 
 fn get_latest_jdk_version_url(major: u8) -> String {
@@ -62,7 +62,9 @@ struct JdkVersion {
 }
 
 pub fn get_latest_jdk_version(major: u8) -> Result<String> {
-    let response = HTTP_CLIENT.get(&get_latest_jdk_version_url(major)).send()
+    let response = HTTP_CLIENT
+        .get(&get_latest_jdk_version_url(major))
+        .send()
         .context("Failed to get latest JDK version from Adopt API")?;
     if !response.status().is_success() {
         return Err(handle_response_fail(
@@ -70,7 +72,9 @@ pub fn get_latest_jdk_version(major: u8) -> Result<String> {
             "Failed to get latest JDK version",
         ));
     }
-    let mut page: JdkVersionsPage = response.json().context("Failed to get JSON from Adopt API")?;
+    let mut page: JdkVersionsPage = response
+        .json()
+        .context("Failed to get JSON from Adopt API")?;
     let base_version = page.versions.remove(0).openjdk_version;
     let fixed_version = match base_version.find('-').or_else(|| base_version.find('+')) {
         Some(index) => (&base_version[..index]).to_string(),

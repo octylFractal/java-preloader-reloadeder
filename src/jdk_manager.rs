@@ -3,7 +3,7 @@ use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result, Context};
+use anyhow::{anyhow, Context, Result};
 use config::Source;
 use console::Term;
 use log::debug;
@@ -42,20 +42,20 @@ pub fn get_jdk_version(major: u8) -> Option<String> {
 
 pub fn get_all_jdk_majors() -> Result<Vec<u8>> {
     return BASE_PATH
-        .read_dir().context("Failed to read base directory")?
+        .read_dir()
+        .context("Failed to read base directory")?
         .map(|res| {
-            res
-                .map(|e| {
-                    e.path()
-                        .file_name()
-                        // This should be impossible
-                        .expect("cannot be missing file name")
-                        .to_str()
-                        // I don't really know if I should handle non-UTF-8
-                        .expect("Non-UTF8 filename encountered")
-                        .to_string()
-                })
-                .context("Failed to read directory entry")
+            res.map(|e| {
+                e.path()
+                    .file_name()
+                    // This should be impossible
+                    .expect("cannot be missing file name")
+                    .to_str()
+                    // I don't really know if I should handle non-UTF-8
+                    .expect("Non-UTF8 filename encountered")
+                    .to_string()
+            })
+            .context("Failed to read directory entry")
         })
         .filter_map(|res| {
             match res {
@@ -105,10 +105,12 @@ pub fn update_jdk(major: u8) -> Result<()> {
         std::fs::remove_dir_all(&path)
             .with_context(|| format!("Unable to clean JDK folder ({})", path.display()))?;
     }
-    create_dir_all(&path)
-        .with_context(||
-            format!("Unable to create directories to JDK folder ({})", path.display())
-        )?;
+    create_dir_all(&path).with_context(|| {
+        format!(
+            "Unable to create directories to JDK folder ({})",
+            path.display()
+        )
+    })?;
     let temporary_dir = TempDir::new_in(&*BASE_PATH, "jdk-download")
         .context("Failed to create temporary directory")?;
     finish_extract(&path, response, url, &temporary_dir)
@@ -132,7 +134,8 @@ fn finish_extract(
     eprintln!();
     let dir_entries = temporary_dir
         .path()
-        .read_dir().context("Failed to read temp dir")?
+        .read_dir()
+        .context("Failed to read temp dir")?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, io::Error>>()
         .context("Failed to read temp dir entry")?;
@@ -189,10 +192,10 @@ fn unarchive_zip(path: &Path, mut response: Response) {
         let mut options = OpenOptions::new();
         options.create(true).write(true);
         #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(zip_file.unix_mode().unwrap_or(0o666));
-            }
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(zip_file.unix_mode().unwrap_or(0o666));
+        }
         let mut file = options
             .open(path.join(zip_file.name()))
             .expect("Failed to open file");

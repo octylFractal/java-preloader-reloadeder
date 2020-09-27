@@ -1,7 +1,7 @@
 use std::env::{var, var_os};
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result, Context};
+use anyhow::{anyhow, Context, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
@@ -9,10 +9,10 @@ pub static APP_HOME: Lazy<PathBuf> = Lazy::new(|| match var_os("XDG_CONFIG_HOME"
     Some(val) => PathBuf::from(val),
     None => [
         var("HOME").expect("No HOME env var defined"),
-        ".config/jpre".to_string()
+        ".config/jpre".to_string(),
     ]
-        .iter()
-        .collect(),
+    .iter()
+    .collect(),
 });
 
 static CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| APP_HOME.join("config.toml"));
@@ -25,20 +25,19 @@ pub struct Configuration {
 impl Configuration {
     pub fn new() -> Result<Configuration> {
         let ser = std::fs::read_to_string(&*CONFIG_FILE)
-            .or_else(|err|
-                match err.kind() {
-                    // map missing file to empty string
-                    std::io::ErrorKind::NotFound => Ok("".to_string()),
-                    // otherwise still fail
-                    _ => Err(err)
-                }
-            )
+            .or_else(|err| match err.kind() {
+                // map missing file to empty string
+                std::io::ErrorKind::NotFound => Ok("".to_string()),
+                // otherwise still fail
+                _ => Err(err),
+            })
             .context("failed to read from config file")?;
         Ok(toml::from_str(ser.as_str()).context("failed to de-serialize as TOML")?)
     }
 
     pub fn resolve_default(&self) -> Result<u8> {
-        self.default_jdk.ok_or_else(|| anyhow!("No default JDK specified"))
+        self.default_jdk
+            .ok_or_else(|| anyhow!("No default JDK specified"))
     }
 
     pub fn set_default(&mut self, jdk: u8) {

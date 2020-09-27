@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
-use regex::Regex;
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 const FILENAME: &str = "filename=";
 const FILENAME_EXT: &str = "filename*=";
@@ -32,12 +32,9 @@ pub fn parse_filename(header: &str) -> Result<String> {
         .and_then(|e| e)
 }
 
-static TOKEN_RE: Lazy<Regex> = Lazy::new(||
-    Regex::new("^[!#$%&'*+.0-9A-Z^_`a-z|~-]+$").unwrap()
-);
-static QUOTED_TEXT_RE: Lazy<Regex> = Lazy::new(||
-    Regex::new("^([^\x00-\x1F\x7F\"]|[\r\n\t ]|\\\")+$").unwrap()
-);
+static TOKEN_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[!#$%&'*+.0-9A-Z^_`a-z|~-]+$").unwrap());
+static QUOTED_TEXT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new("^([^\x00-\x1F\x7F\"]|[\r\n\t ]|\\\")+$").unwrap());
 
 // A REALLY BAD content-disposition parser
 // Didn't need to work very well so it is likely to break / accept invalid filenames

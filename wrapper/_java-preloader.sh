@@ -15,7 +15,7 @@ jpre() {
             return $exit_code
         fi
         eval "$code" || { printf '%s\n' "Failed to evaluate jpre-use code!"; return 1; }
-        printf '%s\n' "Now using $(command jpre current)."
+        printf '%s\n' "$(tput setaf 2)Now using $(command jpre current).$(tput sgr0)"
         return 0
     fi
 

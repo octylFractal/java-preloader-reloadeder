@@ -1,8 +1,10 @@
 #![deny(warnings)]
 
 use anyhow::{anyhow, Result};
+use colored::*;
 use either::Either;
 use structopt::StructOpt;
+
 use crate::config::Configuration;
 
 mod adoptjdk;
@@ -47,7 +49,9 @@ enum Subcommand {
 }
 
 fn parse_jdk_or_keyword(s: String) -> Either<u8, String> {
-    s.parse::<u8>().map(Either::Left).unwrap_or_else(|_| Either::Right(s))
+    s.parse::<u8>()
+        .map(Either::Left)
+        .unwrap_or_else(|_| Either::Right(s))
 }
 
 fn load_default(config: &Configuration, jdk: String) -> Result<u8> {
@@ -74,7 +78,10 @@ fn load_jdk_list(config: &Configuration, jdk: String) -> Result<Vec<u8>> {
             } else if unknown == "all" {
                 jdk_manager::get_all_jdk_majors()
             } else {
-                Err(anyhow!("Not a JDK major version, 'all', or 'default': {}", unknown))
+                Err(anyhow!(
+                    "Not a JDK major version, 'all', or 'default': {}",
+                    unknown
+                ))
             }
         }
     }
@@ -82,7 +89,13 @@ fn load_jdk_list(config: &Configuration, jdk: String) -> Result<Vec<u8>> {
 
 const CURRENT_ENV_VAR: &str = "JPRE_JAVA_VERSION";
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(error) = main_for_result() {
+        eprintln!("{}", format!("Error: {:?}", error).red());
+    }
+}
+
+fn main_for_result() -> Result<()> {
     let mut config = Configuration::new()?;
     let args = Jpre::from_args();
     stderrlog::new().verbosity(args.verbose).init()?;
@@ -104,17 +117,25 @@ fn main() -> Result<()> {
                 if let Some((_, version)) = versions.iter().filter(|(x, _)| *x == major).next() {
                     let latest = adoptjdk::get_latest_jdk_version(major)?;
                     if latest != *version {
-                        println!("Update available: {} -> {}", version, latest);
+                        println!(
+                            "{} {}",
+                            "Update available:".green(),
+                            format!(
+                                "{} -> {}",
+                                version.to_string().yellow(),
+                                latest.to_string().cyan()
+                            )
+                        );
                         update_versions.push(major);
                     }
-                } else  {
-                    println!("{} is not installed", major);
-                    continue
+                } else {
+                    println!("{}", format!("{} is not installed", major).yellow());
+                    continue;
                 }
             }
 
             if update_versions.is_empty() {
-                println!("No updates available.");
+                println!("{}", "No updates available.".yellow());
             }
 
             if !check {
@@ -127,12 +148,15 @@ fn main() -> Result<()> {
             let majors = jdk_manager::get_all_jdk_majors()?;
             let versions = jdk_manager::map_available_jdk_versions(&majors);
             for (major, version) in versions {
-                println!("{}: {}", major, version);
+                println!(
+                    "{}: {}",
+                    major.to_string().cyan(),
+                    version.to_string().green()
+                );
             }
         }
         Subcommand::Current {} => {
-            let jdk_version = std::env::var(CURRENT_ENV_VAR)
-                .unwrap_or_else(|_| "".to_string());
+            let jdk_version = std::env::var(CURRENT_ENV_VAR).unwrap_or_else(|_| "".to_string());
             println!("{}", jdk_version);
         }
         Subcommand::Default { jdk } => {
@@ -140,13 +164,17 @@ fn main() -> Result<()> {
                 jdk_manager::get_jdk_path(jdk_major)?;
                 config.set_default(jdk_major);
                 config.save()?;
+                println!(
+                    "{}",
+                    format!("Updated default JDK to {}", jdk_major).green()
+                );
             } else {
                 match config.resolve_default() {
                     Ok(jdk_major) => {
-                        println!("{}", jdk_major);
+                        println!("{}", jdk_major.to_string().green());
                     }
                     Err(err) => {
-                        eprintln!("{}", err);
+                        eprintln!("{}", err.to_string().red());
                     }
                 }
             }
