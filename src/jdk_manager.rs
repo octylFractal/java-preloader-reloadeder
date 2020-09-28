@@ -76,7 +76,7 @@ pub fn get_all_jdk_majors() -> Result<Vec<u8>> {
             Ok(Vec::new())
         } else {
             Err(read_dir_error)?
-        }
+        };
     }
     return read_dir_result
         .context("Failed to read base directory")?

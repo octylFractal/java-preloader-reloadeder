@@ -24,10 +24,7 @@ fn get_jdk_url(major: u8) -> Result<String> {
     }?;
     return Ok(format!(
         "{}/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/adoptopenjdk?project=jdk",
-        BASE_URL,
-        major,
-        std::env::consts::OS,
-        arch,
+        BASE_URL, major, os, arch,
     ));
 }
 
