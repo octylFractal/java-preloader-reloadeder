@@ -69,8 +69,16 @@ pub fn get_jdk_version(major: u8) -> Option<String> {
 }
 
 pub fn get_all_jdk_majors() -> Result<Vec<u8>> {
-    return BASE_PATH
-        .read_dir()
+    let read_dir_result = BASE_PATH.read_dir();
+    if let Err(read_dir_error) = read_dir_result {
+        return if read_dir_error.kind() == std::io::ErrorKind::NotFound {
+            // ignore if we can't find the dir
+            Ok(Vec::new())
+        } else {
+            Err(read_dir_error)?
+        }
+    }
+    return read_dir_result
         .context("Failed to read base directory")?
         .map(|res| {
             res.map(|e| {

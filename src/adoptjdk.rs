@@ -6,10 +6,21 @@ use anyhow::{anyhow, Context, Result};
 const BASE_URL: &str = "https://api.adoptopenjdk.net/v3";
 
 fn get_jdk_url(major: u8) -> Result<String> {
-    let arch = match std::env::consts::ARCH {
-        "x86" => Ok("x86"),
-        "x86_64" => Ok("x64"),
-        unknown => Err(anyhow!("Unknown ARCH {}", unknown)),
+    let arch = {
+        let env_arch = std::env::consts::ARCH;
+        match env_arch {
+            "x86" => Ok(env_arch),
+            "x86_64" => Ok("x64"),
+            _ => Err(anyhow!("Unknown ARCH {}", env_arch)),
+        }
+    }?;
+    let os = {
+        let env_os = std::env::consts::OS;
+        match env_os {
+            "linux" => Ok(env_os),
+            "macos" => Ok("mac"),
+            _ => Err(anyhow!("Unknown OS {}", env_os)),
+        }
     }?;
     return Ok(format!(
         "{}/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/adoptopenjdk?project=jdk",
