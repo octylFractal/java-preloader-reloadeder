@@ -5,15 +5,19 @@ use anyhow::{anyhow, Context, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
-pub static APP_HOME: Lazy<PathBuf> = Lazy::new(|| match var_os("XDG_CONFIG_HOME") {
-    Some(val) => PathBuf::from(val),
-    None => [
-        var("HOME").expect("No HOME env var defined"),
-        ".config/jpre".to_string(),
-    ]
-    .iter()
-    .collect(),
-});
+pub static APP_HOME: Lazy<PathBuf> = Lazy::new(|| get_config_dir().join("jpre"));
+
+fn get_config_dir() -> PathBuf {
+    match var_os("XDG_CONFIG_HOME") {
+        Some(val) => PathBuf::from(val),
+        None => [
+            var("HOME").expect("No HOME env var defined"),
+            ".config".to_string(),
+        ]
+        .iter()
+        .collect(),
+    }
+}
 
 static CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| APP_HOME.join("config.toml"));
 

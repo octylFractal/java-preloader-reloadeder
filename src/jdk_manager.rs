@@ -1,21 +1,44 @@
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::collections::HashMap;
+use std::ffi::CStr;
+use std::fs::{create_dir_all, File};
 use std::io;
-use std::io::{Write, Read};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use config::Source;
 use console::Term;
 use log::debug;
 use once_cell::sync::Lazy;
 use tempdir::TempDir;
-use zip::read::read_zipfile_from_stream;
 
 use crate::adoptjdk;
 use crate::content_disposition_parser::parse_filename;
 use crate::http_failure::handle_response_fail;
 
 static BASE_PATH: Lazy<PathBuf> = Lazy::new(|| crate::config::APP_HOME.join("jdks"));
+static BY_TTY: Lazy<PathBuf> = Lazy::new(|| std::env::temp_dir().join("jpre-by-tty"));
+
+pub fn get_symlink_location() -> Result<PathBuf> {
+    // Specifically check stderr, as stdout is likely to be redirected
+    if !console::Term::stderr().is_term() {
+        return Err(anyhow!("Not a TTY"));
+    }
+    let tty = unsafe { CStr::from_ptr(libc::ttyname(libc::STDERR_FILENO)).to_str()? };
+    let tty_as_name = tty.replace('/', "-");
+    create_dir_all(&*BY_TTY).context("Failed to create by-tty directory")?;
+    return Ok(BY_TTY.join(tty_as_name));
+}
+
+pub fn get_current_jdk() -> Result<String> {
+    let symlink = get_symlink_location()?;
+    let actual = symlink.read_link().context("No current JDK")?;
+    return actual
+        .file_name()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.parse::<u8>().ok())
+        .and_then(|m| get_jdk_version(m))
+        .context("Not linked to an actual JDK");
+}
 
 const FINISHED_MARKER: &str = ".jdk_marker";
 
@@ -30,13 +53,19 @@ pub fn get_jdk_version(major: u8) -> Option<String> {
         debug!("No release file exists in JDK {}", major);
         return None;
     }
-    let config = config::File::from(release)
-        .format(config::FileFormat::Toml)
-        .collect()
-        .ok()?;
-    return config
-        .get("JAVA_VERSION")
-        .and_then(|v| v.clone().into_str().ok());
+    let config = std::fs::read_to_string(release)
+        .context("Failed to read release file")
+        .and_then(|data| {
+            toml::from_str::<HashMap<String, String>>(data.as_str())
+                .context("Failed to parse TOML from release file")
+        });
+    match config {
+        Ok(map) => map.get("JAVA_VERSION").map(|v| v.clone()),
+        Err(error) => {
+            debug!("{:?}", error);
+            None
+        }
+    }
 }
 
 pub fn get_all_jdk_majors() -> Result<Vec<u8>> {
@@ -74,6 +103,16 @@ pub fn map_available_jdk_versions(majors: &Vec<u8>) -> Vec<(u8, String)> {
         .collect();
     vec.sort_by_key(|v| v.0);
     return vec;
+}
+
+pub fn symlink_jdk_path(major: u8) -> Result<()> {
+    let path = get_jdk_path(major)?;
+    let symlink = get_symlink_location()?;
+    if symlink.exists() {
+        std::fs::remove_file(&symlink)?;
+    }
+    std::os::unix::fs::symlink(path, symlink)?;
+    Ok(())
 }
 
 pub fn get_jdk_path(major: u8) -> Result<PathBuf> {
@@ -124,8 +163,6 @@ fn finish_extract(
 ) -> Result<()> {
     if url.ends_with(".tar.gz") {
         unarchive_tar_gz(temporary_dir.path(), response.split().2)
-    } else if url.ends_with(".zip") {
-        unarchive_zip(temporary_dir.path(), response.split().2)
     } else {
         return Err(anyhow!("Don't know how to handle {}", url));
     }
@@ -162,41 +199,5 @@ fn unarchive_tar_gz(path: &Path, mut reader: impl Read) {
         term.write(format!("Extracting {}", file.path().unwrap().display()).as_bytes())
             .unwrap();
         file.unpack_in(path).unwrap();
-    }
-}
-
-fn unarchive_zip(path: &Path, mut reader: impl Read) {
-    let mut term = Term::stderr();
-    loop {
-        let mut zip_file = match read_zipfile_from_stream(&mut reader) {
-            Ok(Some(entry)) => entry,
-            Ok(None) => break,
-            Err(err) => panic!("Error reading zip: {}", err),
-        };
-        let name = zip_file.name();
-        if name.starts_with("/") || name.contains("..") {
-            panic!("Illegal zip file name: {}", name);
-        }
-        term.clear_line().unwrap();
-        term.write(format!("Extracting {}", name).as_bytes())
-            .unwrap();
-        if zip_file.is_dir() {
-            create_dir_all(zip_file.name()).unwrap();
-            continue;
-        }
-        if !zip_file.is_file() {
-            continue;
-        }
-        let mut options = OpenOptions::new();
-        options.create(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(zip_file.unix_mode().unwrap_or(0o666));
-        }
-        let mut file = options
-            .open(path.join(zip_file.name()))
-            .expect("Failed to open file");
-        io::copy(&mut zip_file, &mut file).expect("Unable to copy to file");
     }
 }

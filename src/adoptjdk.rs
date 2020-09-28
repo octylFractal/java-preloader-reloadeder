@@ -21,7 +21,9 @@ fn get_jdk_url(major: u8) -> Result<String> {
 }
 
 pub fn get_latest_jdk_binary(major: u8) -> Result<attohttpc::Response> {
-    attohttpc::get(&get_jdk_url(major)?).send().context("Failed to get latest JDK binary")
+    attohttpc::get(&get_jdk_url(major)?)
+        .send()
+        .context("Failed to get latest JDK binary")
 }
 
 fn get_latest_jdk_version_url(major: u8) -> String {
@@ -52,7 +54,8 @@ struct JdkVersion {
 }
 
 pub fn get_latest_jdk_version(major: u8) -> Result<String> {
-    let response = attohttpc::get(&get_latest_jdk_version_url(major)).send()
+    let response = attohttpc::get(&get_latest_jdk_version_url(major))
+        .send()
         .context("Failed to get latest JDK version")?;
     if !response.is_success() {
         return Err(handle_response_fail(

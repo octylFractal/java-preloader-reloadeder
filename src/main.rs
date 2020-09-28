@@ -1,26 +1,25 @@
 #![deny(warnings)]
 
-use anyhow::{anyhow, Result};
+use std::process::exit;
+
+use anyhow::{anyhow, Context, Result};
 use colored::*;
 use either::Either;
 use structopt::StructOpt;
 
 use crate::config::Configuration;
-use std::process::exit;
 
 mod adoptjdk;
 mod config;
 mod content_disposition_parser;
-mod jdk_manager;
 mod http_failure;
+mod jdk_manager;
 
 #[derive(StructOpt)]
 #[structopt(name = "jpre", about = "A JDK management tool")]
 struct Jpre {
     #[structopt(short, long, parse(from_occurrences))]
     verbose: usize,
-    #[structopt(long, hidden = true)]
-    shell_integration: bool,
     #[structopt(subcommand)]
     cmd: Subcommand,
 }
@@ -49,6 +48,8 @@ enum Subcommand {
                             or nothing to get the default")]
         jdk: Option<u8>,
     },
+    #[structopt(about = "Print the path to the JAVA_HOME symlink for the current TTY")]
+    JavaHome {},
 }
 
 fn parse_jdk_or_keyword(s: String) -> Either<u8, String> {
@@ -90,17 +91,29 @@ fn load_jdk_list(config: &Configuration, jdk: String) -> Result<Vec<u8>> {
     }
 }
 
-const CURRENT_ENV_VAR: &str = "JPRE_JAVA_VERSION";
+fn check_env_bound() -> Result<()> {
+    let symlink_path = jdk_manager::get_symlink_location()?;
+    let symlink = symlink_path
+        .to_str()
+        .context("Failed to get symlink as string")?;
+    let java_home = std::env::var("JAVA_HOME").unwrap_or_else(|_| "".to_string());
+    if symlink != java_home {
+        eprintln!(
+            "{}",
+            format!(
+                "Warning: JAVA_HOME is set to '{}', not the jpre symlink '{}'.\n\
+                 Don't forget to export JAVA_HOME=\"$(jpre java-home)\"!",
+                java_home, symlink
+            )
+            .yellow()
+        )
+    }
+    Ok(())
+}
 
 fn main() {
     let args: Jpre = Jpre::from_args();
-    let in_shell = args.shell_integration;
     if let Err(error) = main_for_result(args) {
-        // Force the errors to print in color if we're in the integration
-        // Otherwise colored thinks we're not in a TTY, but error is!
-        if in_shell {
-            colored::control::set_override(true);
-        }
         eprintln!("{}", format!("Error: {:?}", error).red());
         exit(1);
     }
@@ -111,12 +124,9 @@ fn main_for_result(args: Jpre) -> Result<()> {
     stderrlog::new().verbosity(args.verbose).init()?;
     match args.cmd {
         Subcommand::Use { jdk } => {
+            check_env_bound()?;
             let jdk_major = load_default(&config, jdk)?;
-            let path = jdk_manager::get_jdk_path(jdk_major)?;
-            let jdk_version = jdk_manager::get_jdk_version(jdk_major)
-                .ok_or_else(|| anyhow!("Unable to get current JDK version"))?;
-            println!("export JAVA_HOME={}", path.canonicalize()?.display());
-            println!("export {}={}", CURRENT_ENV_VAR, jdk_version);
+            jdk_manager::symlink_jdk_path(jdk_major)?;
         }
         Subcommand::Update { check, jdk } => {
             let majors = load_jdk_list(&config, jdk)?;
@@ -166,8 +176,9 @@ fn main_for_result(args: Jpre) -> Result<()> {
             }
         }
         Subcommand::Current {} => {
-            let jdk_version = std::env::var(CURRENT_ENV_VAR).unwrap_or_else(|_| "".to_string());
-            println!("{}", jdk_version);
+            check_env_bound()?;
+            let jdk_version = jdk_manager::get_current_jdk().unwrap_or_else(|_| "".to_string());
+            println!("{}", jdk_version.green());
         }
         Subcommand::Default { jdk } => {
             if let Some(jdk_major) = jdk {
@@ -188,6 +199,22 @@ fn main_for_result(args: Jpre) -> Result<()> {
                     }
                 }
             }
+        }
+        Subcommand::JavaHome {} => {
+            let symlink_location = jdk_manager::get_symlink_location()?;
+            if !symlink_location.exists() {
+                // Initialize with default
+                if let Ok(default) = config.resolve_default() {
+                    jdk_manager::symlink_jdk_path(default)?;
+                }
+            }
+            println!(
+                "{}",
+                symlink_location
+                    .to_str()
+                    .ok_or_else(|| anyhow!("Invalid symlink location"))?
+                    .green()
+            );
         }
     };
     Ok(())

@@ -4,12 +4,14 @@ java-preloader-reloadeder
 
 Replacement for my old [gist](https://gist.github.com/octylFractal/d85e0b160d8be75dbca29910a2b34f34).
 
-Downloads JDKs from AdoptOpenJDK into `$XDG_CONFIG_HOME/jpre/jdks`, then
-makes them available to the shell via a wrapper script.
+Downloads JDKs from AdoptOpenJDK into `$XDG_CONFIG_HOME/jpre/jdks`, then sets a symlink to the currently active JDK.
+The symlinks are per-TTY (which usually implies per-shell), and stored in the Rust-std-determined temporary folder,
+which is usually `$TMPDIR` or `/tmp`.
 
 # Installation
-Run `cargo install jpre`, and put `wrapper/_java-preloader.sh` wherever you would like, and `source` it
-into your shell. This will give you a `jpre` command fully integrated into your shell, allowing
-`jpre use` to actually change the `JAVA_HOME` variable in your shell.
- 
-Note: If the shell integration isn't working, you'll get a dump of the shell code to execute instead.
+Run `cargo install jpre` to get the `jpre` binary, and set your `JAVA_HOME` to `$(jpre java-home)`.
+For most people adding this is enough:
+```sh
+export JAVA_HOME="$(jpre java-home)"
+```
+This path will be symlinked to the currently selected JDK.
