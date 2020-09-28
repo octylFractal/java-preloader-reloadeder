@@ -127,6 +127,9 @@ fn main_for_result(args: Jpre) -> Result<()> {
             check_env_bound()?;
             let jdk_major = load_default(&config, jdk)?;
             jdk_manager::symlink_jdk_path(jdk_major)?;
+            let jdk_version = jdk_manager::get_jdk_version(jdk_major)
+                .context("Failed to get JDK version")?;
+            eprintln!("{}", format!("Now using JDK {}", jdk_version).green());
         }
         Subcommand::Update { check, jdk } => {
             let majors = load_jdk_list(&config, jdk)?;
@@ -166,6 +169,10 @@ fn main_for_result(args: Jpre) -> Result<()> {
         }
         Subcommand::List {} => {
             let majors = jdk_manager::get_all_jdk_majors()?;
+            if majors.is_empty() {
+                eprintln!("{}", "No JDKs installed.".yellow());
+                return Ok(());
+            }
             let versions = jdk_manager::map_available_jdk_versions(&majors);
             for (major, version) in versions {
                 println!(
