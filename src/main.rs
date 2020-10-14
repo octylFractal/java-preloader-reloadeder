@@ -127,8 +127,8 @@ fn main_for_result(args: Jpre) -> Result<()> {
             check_env_bound()?;
             let jdk_major = load_default(&config, jdk)?;
             jdk_manager::symlink_jdk_path(jdk_major)?;
-            let jdk_version = jdk_manager::get_jdk_version(jdk_major)
-                .context("Failed to get JDK version")?;
+            let jdk_version =
+                jdk_manager::get_jdk_version(jdk_major).context("Failed to get JDK version")?;
             eprintln!("{}", format!("Now using JDK {}", jdk_version).green());
         }
         Subcommand::Update { check, jdk } => {
