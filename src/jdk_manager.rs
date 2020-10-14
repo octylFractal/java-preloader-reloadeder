@@ -170,7 +170,7 @@ fn finish_extract(
     temporary_dir: &TempDir,
 ) -> Result<()> {
     if url.ends_with(".tar.gz") {
-        unarchive_tar_gz(temporary_dir.path(), response.split().2)
+        unarchive_tar_gz(temporary_dir.path(), response)
     } else {
         return Err(anyhow!("Don't know how to handle {}", url));
     }

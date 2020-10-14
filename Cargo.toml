@@ -3,7 +3,7 @@ name = "jpre"
 description = "A JDK management tool"
 keywords = ["java", "jdk"]
 categories = ["command-line-utilities", "development-tools::build-utils"]
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Octavia Togami <octavia.togami@gmail.com>"]
 license = "GPL-3.0-or-later"
 readme = "README.md"
@@ -14,7 +14,7 @@ edition = "2018"
 
 [dependencies]
 structopt = "0.3.18"
-attohttpc = { version = "0.15.0", default-features = false, features = ["json", "tls"] }
+attohttpc = { version = "0.16.0", default-features = false, features = ["json", "tls"] }
 tar = "0.4.30"
 libflate = "1.0.2"
 once_cell = "1.4.1"
