@@ -158,8 +158,13 @@ pub fn update_jdk(major: u8) -> Result<()> {
     })?;
     let temporary_dir = TempDir::new_in(&*BASE_PATH, "jdk-download")
         .context("Failed to create temporary directory")?;
-    finish_extract(&path, response, url, &temporary_dir)
-        .and_then(|_| temporary_dir.close().context("Failed to cleanup temp dir"))?;
+    finish_extract(&path, response, url, &temporary_dir).and_then(|_| {
+        if temporary_dir.path().exists() {
+            temporary_dir.close().context("Failed to cleanup temp dir")
+        } else {
+            Ok(())
+        }
+    })?;
     return Ok(());
 }
 
@@ -180,12 +185,27 @@ fn finish_extract(
         .read_dir()
         .context("Failed to read temp dir")?
         .map(|res| res.map(|e| e.path()))
+        .filter(|r| {
+            match r {
+                Ok(p) => match p.file_name() {
+                    Some(name) => !name.to_string_lossy().starts_with("."),
+                    _ => true,
+                }
+                _ => true,
+            }
+        })
         .collect::<Result<Vec<_>, io::Error>>()
         .context("Failed to read temp dir entry")?;
+    eprintln!("{:?}", dir_entries);
     let from_dir = if dir_entries.len() == 1 {
-        &dir_entries[0]
+        if std::env::consts::OS == "macos" {
+            let x = &dir_entries[0];
+            x.join("Contents/Home")
+        } else {
+            (&dir_entries[0]).to_path_buf()
+        }
     } else {
-        temporary_dir.path()
+        temporary_dir.path().to_path_buf()
     };
 
     std::fs::rename(from_dir, &path)
