@@ -40,6 +40,8 @@ impl Configuration {
 
     pub fn save(&self) -> Result<()> {
         let ser = toml::to_string(self).expect("Failed to serialize as TOML");
+        std::fs::create_dir_all(CONFIG_FILE.parent().expect("no parent directory?"))
+            .context("Failed to create config file directories")?;
         std::fs::write(&*CONFIG_FILE, ser).context("Failed to write to config file")
     }
 }
