@@ -1,25 +1,15 @@
-use std::env::{var, var_os};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use directories_next::ProjectDirs;
 
-pub static APP_HOME: Lazy<PathBuf> = Lazy::new(|| get_config_dir().join("jpre"));
+pub static PROJECT_DIRS: Lazy<ProjectDirs> = Lazy::new(||
+    ProjectDirs::from("net", "octyl", "jpre").expect("No project dirs derived?")
+);
 
-fn get_config_dir() -> PathBuf {
-    match var_os("XDG_CONFIG_HOME") {
-        Some(val) => PathBuf::from(val),
-        None => [
-            var("HOME").expect("No HOME env var defined"),
-            ".config".to_string(),
-        ]
-        .iter()
-        .collect(),
-    }
-}
-
-static CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| APP_HOME.join("config.toml"));
+static CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| PROJECT_DIRS.config_dir().join("config.toml"));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Configuration {

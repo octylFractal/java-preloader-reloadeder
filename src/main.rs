@@ -14,6 +14,7 @@ mod config;
 mod content_disposition_parser;
 mod http_failure;
 mod jdk_manager;
+mod progress;
 
 #[derive(StructOpt)]
 #[structopt(name = "jpre", about = "A JDK management tool")]
@@ -120,25 +121,25 @@ fn main() {
 }
 
 fn main_for_result(args: Jpre) -> Result<()> {
-    let mut config = Configuration::new()?;
-    stderrlog::new().verbosity(args.verbose).init()?;
+    let mut config = Configuration::new().context("Failed to load config")?;
+    stderrlog::new().verbosity(args.verbose).init().context("Failed to initialize logging")?;
     match args.cmd {
         Subcommand::Use { jdk } => {
-            check_env_bound()?;
-            let jdk_major = load_default(&config, jdk)?;
-            jdk_manager::symlink_jdk_path(jdk_major)?;
+            check_env_bound().context("Failed to check environment variables")?;
+            let jdk_major = load_default(&config, jdk).context("Failed to load default JDK binding")?;
+            jdk_manager::symlink_jdk_path(jdk_major).context("Failed to overwrite symlink with JDK binding")?;
             let jdk_version =
                 jdk_manager::get_jdk_version(jdk_major).context("Failed to get JDK version")?;
             eprintln!("{}", format!("Now using JDK {}", jdk_version).green());
         }
         Subcommand::Update { check, jdk } => {
-            let majors = load_jdk_list(&config, jdk)?;
+            let majors = load_jdk_list(&config, jdk).context("Failed to load JDK list")?;
             let versions = jdk_manager::map_available_jdk_versions(&majors);
             let mut update_versions = Vec::new();
 
             for major in majors {
                 if let Some((_, version)) = versions.iter().filter(|(x, _)| *x == major).next() {
-                    let latest = adoptjdk::get_latest_jdk_version(major)?;
+                    let latest = adoptjdk::get_latest_jdk_version(major).context("Failed to get latest JDK version")?;
                     if latest != *version {
                         println!(
                             "{} {}",
@@ -163,12 +164,12 @@ fn main_for_result(args: Jpre) -> Result<()> {
 
             if !check {
                 for major in update_versions {
-                    jdk_manager::update_jdk(major)?;
+                    jdk_manager::update_jdk(major).context("Failed to update JDK")?;
                 }
             }
         }
         Subcommand::List {} => {
-            let majors = jdk_manager::get_all_jdk_majors()?;
+            let majors = jdk_manager::get_all_jdk_majors().context("Failed to load all installed JDKs")?;
             if majors.is_empty() {
                 eprintln!("{}", "No JDKs installed.".yellow());
                 return Ok(());
@@ -183,15 +184,15 @@ fn main_for_result(args: Jpre) -> Result<()> {
             }
         }
         Subcommand::Current {} => {
-            check_env_bound()?;
+            check_env_bound().context("Failed to check environment variables")?;
             let jdk_version = jdk_manager::get_current_jdk().unwrap_or_else(|_| "".to_string());
             println!("{}", jdk_version.green());
         }
         Subcommand::Default { jdk } => {
             if let Some(jdk_major) = jdk {
-                jdk_manager::get_jdk_path(jdk_major)?;
+                jdk_manager::get_jdk_path(jdk_major).context("Failed to get JDK path")?;
                 config.set_default(jdk_major);
-                config.save()?;
+                config.save().context("Failed to save config")?;
                 println!(
                     "{}",
                     format!("Updated default JDK to {}", jdk_major).green()
@@ -208,7 +209,7 @@ fn main_for_result(args: Jpre) -> Result<()> {
             }
         }
         Subcommand::JavaHome {} => {
-            let symlink_location = jdk_manager::get_symlink_location()?;
+            let symlink_location = jdk_manager::get_symlink_location().context("Failed to get symlink binding")?;
             if !symlink_location.exists() {
                 // Initialize with default
                 if let Ok(default) = config.resolve_default() {

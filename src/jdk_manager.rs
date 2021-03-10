@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs::{create_dir_all, File};
 use std::io;
-use std::io::{Read, Write};
+use std::io::{Read, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use console::Term;
+use indicatif::{MultiProgress, ProgressDrawTarget};
 use log::debug;
 use once_cell::sync::Lazy;
 use tempdir::TempDir;
@@ -14,13 +14,14 @@ use tempdir::TempDir;
 use crate::adoptjdk;
 use crate::content_disposition_parser::parse_filename;
 use crate::http_failure::handle_response_fail;
+use crate::progress::new_progress_bar;
 
-static BASE_PATH: Lazy<PathBuf> = Lazy::new(|| crate::config::APP_HOME.join("jdks"));
+static BASE_PATH: Lazy<PathBuf> = Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
 static BY_TTY: Lazy<PathBuf> = Lazy::new(|| std::env::temp_dir().join("jpre-by-tty"));
 
 pub fn get_symlink_location() -> Result<PathBuf> {
     // Specifically check stderr, as stdout is likely to be redirected
-    if !console::Term::stderr().is_term() {
+    if !console::Term::stderr().features().is_attended() {
         return Err(anyhow!("Not a TTY"));
     }
     let tty = unsafe { CStr::from_ptr(libc::ttyname(libc::STDERR_FILENO)).to_str()? };
@@ -114,12 +115,12 @@ pub fn map_available_jdk_versions(majors: &Vec<u8>) -> Vec<(u8, String)> {
 }
 
 pub fn symlink_jdk_path(major: u8) -> Result<()> {
-    let path = get_jdk_path(major)?;
-    let symlink = get_symlink_location()?;
-    if symlink.exists() {
-        std::fs::remove_file(&symlink)?;
+    let path = get_jdk_path(major).context("Failed to get JDK path")?;
+    let symlink = get_symlink_location().context("Failed to get symlink location")?;
+    if symlink.symlink_metadata().is_ok() {
+        std::fs::remove_file(&symlink).context("Failed to remove old symlink")?;
     }
-    std::os::unix::fs::symlink(path, symlink)?;
+    std::os::unix::fs::symlink(path, symlink).context("Failed to make new symlink")?;
     Ok(())
 }
 
@@ -175,7 +176,12 @@ fn finish_extract(
     temporary_dir: &TempDir,
 ) -> Result<()> {
     if url.ends_with(".tar.gz") {
-        unarchive_tar_gz(temporary_dir.path(), response)
+        let expected_size = response.headers().get("Content-length").and_then(|len| {
+            len.to_str()
+                .ok()
+                .and_then(|len_str| len_str.parse::<u64>().ok())
+        });
+        unarchive_tar_gz(temporary_dir.path(), expected_size, response)
     } else {
         return Err(anyhow!("Don't know how to handle {}", url));
     }
@@ -196,7 +202,6 @@ fn finish_extract(
         })
         .collect::<Result<Vec<_>, io::Error>>()
         .context("Failed to read temp dir entry")?;
-    eprintln!("{:?}", dir_entries);
     let from_dir = if dir_entries.len() == 1 {
         if std::env::consts::OS == "macos" {
             let x = &dir_entries[0];
@@ -215,17 +220,26 @@ fn finish_extract(
     Ok(())
 }
 
-fn unarchive_tar_gz(path: &Path, mut reader: impl Read) {
-    let mut term = Term::stderr();
-    let gz_decode = libflate::gzip::Decoder::new(&mut reader).unwrap();
-    let mut archive = tar::Archive::new(gz_decode);
-    archive.set_preserve_permissions(true);
-    archive.set_overwrite(true);
-    for entry in archive.entries().unwrap() {
-        let mut file = entry.unwrap();
-        term.clear_line().unwrap();
-        term.write(format!("Extracting {}", file.path().unwrap().display()).as_bytes())
-            .unwrap();
-        file.unpack_in(path).unwrap();
-    }
+fn unarchive_tar_gz(path: &Path, expected_size: Option<u64>, reader: impl Read + Send + 'static) {
+    let all_bars = MultiProgress::with_draw_target(ProgressDrawTarget::stderr());
+    let download_bar = all_bars.add(new_progress_bar(expected_size));
+    download_bar.set_message("Download progress");
+    let writing_bar = all_bars.add(new_progress_bar(None));
+
+    let static_path = path.to_path_buf();
+    let _ = std::thread::spawn(move || {
+        let gz_decode = libflate::gzip::Decoder::new(BufReader::new(download_bar.wrap_read(reader))).unwrap();
+        let mut archive = tar::Archive::new(BufReader::new(writing_bar.wrap_read(gz_decode)));
+        archive.set_preserve_permissions(true);
+        archive.set_overwrite(true);
+        for entry in archive.entries().unwrap() {
+            let mut file = entry.unwrap();
+            writing_bar.set_message(&*format!("Extracting {}", file.path().unwrap().display()));
+            file.unpack_in(&static_path).unwrap();
+        }
+        download_bar.finish();
+        writing_bar.abandon_with_message("Done extracting!");
+    });
+
+    all_bars.join().unwrap();
 }
