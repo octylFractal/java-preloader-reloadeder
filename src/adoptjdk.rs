@@ -35,11 +35,12 @@ pub fn get_latest_jdk_binary(major: u8) -> Result<attohttpc::Response> {
 }
 
 fn get_latest_jdk_version_url(major: u8) -> String {
-    // grabs a 1 item page containing the most recent version of [major, major+1)
+    // grabs a 10 item page containing the most recent version of [major, major+1)
+    // EAs CAN get mixed in here, unfortunately
     return format!(
         "{}/info/release_versions\
         ?page=0\
-        &page_size=1\
+        &page_size=10\
         &release_type=ga\
         &sort_method=DEFAULT\
         &sort_order=DESC\
@@ -51,14 +52,22 @@ fn get_latest_jdk_version_url(major: u8) -> String {
     );
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct JdkVersionsPage {
     versions: Vec<JdkVersion>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct JdkVersion {
     openjdk_version: String,
+    #[serde(default)]
+    pre: Option<Prerelease>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Prerelease {
+    EA,
 }
 
 pub fn get_latest_jdk_version(major: u8) -> Result<String> {
@@ -71,13 +80,19 @@ pub fn get_latest_jdk_version(major: u8) -> Result<String> {
             "Failed to get latest JDK version",
         ));
     }
-    let mut page: JdkVersionsPage = response
+    let page: JdkVersionsPage = response
         .json()
         .context("Failed to get JSON from Adopt API")?;
-    let base_version = page.versions.remove(0).openjdk_version;
+    let ga_only_versions = page.versions.iter()
+        .filter(|v| v.pre.is_none())
+        .collect::<Vec<_>>();
+    if ga_only_versions.is_empty() {
+        return Err(anyhow!("No versions returned from Adopt API"));
+    }
+    let base_version = &ga_only_versions[0].openjdk_version;
     let fixed_version = match base_version.find('-').or_else(|| base_version.find('+')) {
         Some(index) => (&base_version[..index]).to_string(),
-        None => base_version,
+        None => base_version.to_string(),
     };
-    return Ok(fixed_version.to_string());
+    return Ok(fixed_version);
 }
