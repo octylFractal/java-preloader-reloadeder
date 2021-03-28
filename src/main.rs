@@ -27,7 +27,7 @@ struct Jpre {
 
 #[derive(StructOpt)]
 enum Subcommand {
-    #[structopt(about = "Use a specific JDK")]
+    #[structopt(about = "Download and use a specific JDK")]
     Use {
         #[structopt(help = "The JDK to use (major version only) or 'default'")]
         jdk: String,
