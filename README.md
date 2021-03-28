@@ -10,14 +10,25 @@ which is usually `$TMPDIR` or `/tmp`.
 
 # Installation
 Run `cargo install jpre` to get the `jpre` binary, and set your `JAVA_HOME` to `$(jpre java-home)`.
+
 For most people adding this is enough:
 ```sh
+# Retrieves the TTY-specific path and stores it in JAVA_HOME. This will be symlinked to the currently active JDK.
 export JAVA_HOME="$(jpre java-home)"
+# Puts the binaries on your path
 export PATH="$JAVA_HOME/bin:$PATH"
+# Potentially optional, forces shell to re-scan for `java` et. al
+hash -r
 ```
-This path will be symlinked to the currently selected JDK.
+
+Note that if you do not set a default JDK, the symlinked path will lead nowhere!
 
 # Usage
-Run `jpre use 11`, this downloads jdk 11 from AdoptOpenJDK and makes it the active JDK.
+Run `jpre use 11`, this downloads JDK 11 from AdoptOpenJDK and makes it the active JDK.
 Other major versions can be downloaded and configured using `jpre use <major>`.
 The default JDK can be set using `jpre default <major>`.
+
+Full details are available by running `jpre help`.
+
+# Known Limitations
+Since this is per-TTY, closing and re-opening a terminal tab / window may result in a different JDK than the default, due to TTY reuse.
