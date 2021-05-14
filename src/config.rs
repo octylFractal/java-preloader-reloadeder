@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
+use directories_next::ProjectDirs;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use directories_next::ProjectDirs;
 
-pub static PROJECT_DIRS: Lazy<ProjectDirs> = Lazy::new(||
-    ProjectDirs::from("net", "octyl", "jpre").expect("No project dirs derived?")
-);
+pub static PROJECT_DIRS: Lazy<ProjectDirs> =
+    Lazy::new(|| ProjectDirs::from("net", "octyl", "jpre").expect("No project dirs derived?"));
 
 static CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| PROJECT_DIRS.config_dir().join("config.toml"));
 

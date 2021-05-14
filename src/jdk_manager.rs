@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs::{create_dir_all, File};
 use std::io;
-use std::io::{Read, BufReader};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -16,7 +16,8 @@ use crate::content_disposition_parser::parse_filename;
 use crate::http_failure::handle_response_fail;
 use crate::progress::new_progress_bar;
 
-static BASE_PATH: Lazy<PathBuf> = Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
+static BASE_PATH: Lazy<PathBuf> =
+    Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
 static BY_TTY: Lazy<PathBuf> = Lazy::new(|| std::env::temp_dir().join("jpre-by-tty"));
 
 pub fn get_symlink_location() -> Result<PathBuf> {
@@ -54,11 +55,15 @@ pub fn get_jdk_version(major: u8) -> Option<String> {
         debug!("No release file exists in JDK {}", major);
         return None;
     }
-    let config = std::fs::read_to_string(release)
+    let config = std::fs::read_to_string(&release)
         .context("Failed to read release file")
         .and_then(|data| {
-            toml::from_str::<HashMap<String, String>>(data.as_str())
-                .context("Failed to parse TOML from release file")
+            toml::from_str::<HashMap<String, String>>(data.as_str()).with_context(|| {
+                format!(
+                    "Failed to parse TOML from release file '{}'",
+                    release.display()
+                )
+            })
         });
     match config {
         Ok(map) => map.get("JAVA_VERSION").map(|v| v.clone()),
@@ -191,14 +196,12 @@ fn finish_extract(
         .read_dir()
         .context("Failed to read temp dir")?
         .map(|res| res.map(|e| e.path()))
-        .filter(|r| {
-            match r {
-                Ok(p) => match p.file_name() {
-                    Some(name) => !name.to_string_lossy().starts_with("."),
-                    _ => true,
-                }
+        .filter(|r| match r {
+            Ok(p) => match p.file_name() {
+                Some(name) => !name.to_string_lossy().starts_with("."),
                 _ => true,
-            }
+            },
+            _ => true,
         })
         .collect::<Result<Vec<_>, io::Error>>()
         .context("Failed to read temp dir entry")?;
@@ -228,7 +231,8 @@ fn unarchive_tar_gz(path: &Path, expected_size: Option<u64>, reader: impl Read +
 
     let static_path = path.to_path_buf();
     let _ = std::thread::spawn(move || {
-        let gz_decode = libflate::gzip::Decoder::new(BufReader::new(download_bar.wrap_read(reader))).unwrap();
+        let gz_decode =
+            libflate::gzip::Decoder::new(BufReader::new(download_bar.wrap_read(reader))).unwrap();
         let mut archive = tar::Archive::new(BufReader::new(writing_bar.wrap_read(gz_decode)));
         archive.set_preserve_permissions(true);
         archive.set_overwrite(true);

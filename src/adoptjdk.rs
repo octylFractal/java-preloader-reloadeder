@@ -83,7 +83,9 @@ pub fn get_latest_jdk_version(major: u8) -> Result<String> {
     let page: JdkVersionsPage = response
         .json()
         .context("Failed to get JSON from Adopt API")?;
-    let ga_only_versions = page.versions.iter()
+    let ga_only_versions = page
+        .versions
+        .iter()
         .filter(|v| v.pre.is_none())
         .collect::<Vec<_>>();
     if ga_only_versions.is_empty() {

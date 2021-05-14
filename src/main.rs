@@ -122,12 +122,17 @@ fn main() {
 
 fn main_for_result(args: Jpre) -> Result<()> {
     let mut config = Configuration::new().context("Failed to load config")?;
-    stderrlog::new().verbosity(args.verbose).init().context("Failed to initialize logging")?;
+    stderrlog::new()
+        .verbosity(args.verbose)
+        .init()
+        .context("Failed to initialize logging")?;
     match args.cmd {
         Subcommand::Use { jdk } => {
             check_env_bound().context("Failed to check environment variables")?;
-            let jdk_major = load_default(&config, jdk).context("Failed to load default JDK binding")?;
-            jdk_manager::symlink_jdk_path(jdk_major).context("Failed to overwrite symlink with JDK binding")?;
+            let jdk_major =
+                load_default(&config, jdk).context("Failed to load default JDK binding")?;
+            jdk_manager::symlink_jdk_path(jdk_major)
+                .context("Failed to overwrite symlink with JDK binding")?;
             let jdk_version =
                 jdk_manager::get_jdk_version(jdk_major).context("Failed to get JDK version")?;
             eprintln!("{}", format!("Now using JDK {}", jdk_version).green());
@@ -139,7 +144,8 @@ fn main_for_result(args: Jpre) -> Result<()> {
 
             for major in majors {
                 if let Some((_, version)) = versions.iter().filter(|(x, _)| *x == major).next() {
-                    let latest = adoptjdk::get_latest_jdk_version(major).context("Failed to get latest JDK version")?;
+                    let latest = adoptjdk::get_latest_jdk_version(major)
+                        .context("Failed to get latest JDK version")?;
                     if latest != *version {
                         println!(
                             "{} {}",
@@ -169,7 +175,8 @@ fn main_for_result(args: Jpre) -> Result<()> {
             }
         }
         Subcommand::List {} => {
-            let majors = jdk_manager::get_all_jdk_majors().context("Failed to load all installed JDKs")?;
+            let majors =
+                jdk_manager::get_all_jdk_majors().context("Failed to load all installed JDKs")?;
             if majors.is_empty() {
                 eprintln!("{}", "No JDKs installed.".yellow());
                 return Ok(());
@@ -209,7 +216,8 @@ fn main_for_result(args: Jpre) -> Result<()> {
             }
         }
         Subcommand::JavaHome {} => {
-            let symlink_location = jdk_manager::get_symlink_location().context("Failed to get symlink binding")?;
+            let symlink_location =
+                jdk_manager::get_symlink_location().context("Failed to get symlink binding")?;
             if !symlink_location.exists() {
                 // Initialize with default
                 if let Ok(default) = config.resolve_default() {
