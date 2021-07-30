@@ -1,5 +1,4 @@
 use console::style;
-
 use indicatif::{ProgressBar, ProgressStyle};
 
 pub fn new_progress_bar(bar_length: Option<u64>) -> ProgressBar {

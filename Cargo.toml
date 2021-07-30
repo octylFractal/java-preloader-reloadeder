@@ -14,7 +14,7 @@ edition = "2018"
 
 [dependencies]
 structopt = "0.3.18"
-attohttpc = { version = "0.16.0", default-features = false, features = ["json", "tls", "compress"] }
+attohttpc = { version = "0.17", default-features = false, features = ["json", "tls", "compress"] }
 tar = "0.4.30"
 libflate = "1.0.2"
 once_cell = "1.4.1"
@@ -27,10 +27,11 @@ toml = "0.5.6"
 either = "1.6.1"
 serde = { version = "1.0.116", features = ["derive"] }
 anyhow = "1.0.32"
+thiserror = "1.0.26"
 colored = "2.0.0"
 libc = "0.2.77"
 directories-next = "2.0.0"
-indicatif = "0.15.0"
+indicatif = "0.16"
 
 [profile.dev]
 opt-level = 2

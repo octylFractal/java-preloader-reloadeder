@@ -8,12 +8,14 @@ use either::Either;
 use log::{debug, info};
 use structopt::StructOpt;
 
+use crate::api::adoptium::AdoptiumApi;
+use crate::api::def::JdkFetchApi;
 use crate::config::Configuration;
+use crate::jdk_manager::JdkManager;
 
-mod adoptjdk;
+mod api;
 mod config;
 mod content_disposition_parser;
-mod http_failure;
 mod jdk_manager;
 mod progress;
 
@@ -22,6 +24,10 @@ mod progress;
 struct Jpre {
     #[structopt(short, long, parse(from_occurrences))]
     verbose: usize,
+    #[structopt(long, default_value = "https://api.adoptium.net/v3")]
+    api_base_url: String,
+    #[structopt(long, default_value = "adoptium")]
+    api_vendor: String,
     #[structopt(subcommand)]
     cmd: Subcommand,
 }
@@ -74,7 +80,11 @@ fn load_default(config: &Configuration, jdk: String) -> Result<u8> {
     }
 }
 
-fn load_jdk_list(config: &Configuration, jdk: String) -> Result<Vec<u8>> {
+fn load_jdk_list(
+    jdk_manager: &JdkManager<AdoptiumApi>,
+    config: &Configuration,
+    jdk: String,
+) -> Result<Vec<u8>> {
     let jdk_or_keyword = parse_jdk_or_keyword(jdk);
     match jdk_or_keyword {
         Either::Left(jdk_major) => Ok(vec![jdk_major]),
@@ -82,7 +92,9 @@ fn load_jdk_list(config: &Configuration, jdk: String) -> Result<Vec<u8>> {
             if unknown == "default" {
                 config.resolve_default().map(|v| vec![v])
             } else if unknown == "all" {
-                jdk_manager::get_all_jdk_majors()
+                jdk_manager
+                    .get_all_jdk_majors()
+                    .context("Failed to get all JDK major versions")
             } else {
                 Err(anyhow!(
                     "Not a JDK major version, 'all', or 'default': {}",
@@ -93,8 +105,8 @@ fn load_jdk_list(config: &Configuration, jdk: String) -> Result<Vec<u8>> {
     }
 }
 
-fn check_env_bound() -> Result<()> {
-    let symlink_path = jdk_manager::get_symlink_location()?;
+fn check_env_bound(jdk_manager: &JdkManager<AdoptiumApi>) -> Result<()> {
+    let symlink_path = jdk_manager.get_symlink_location()?;
     let symlink = symlink_path
         .to_str()
         .context("Failed to get symlink as string")?;
@@ -127,27 +139,40 @@ fn main_for_result(args: Jpre) -> Result<()> {
         .verbosity(args.verbose + 1)
         .init()
         .context("Failed to initialize logging")?;
+    let api = AdoptiumApi {
+        base_url: args.api_base_url,
+        vendor: args.api_vendor,
+    };
+    let jdk_manager = JdkManager { api: api.clone() };
     match args.cmd {
         Subcommand::Use { jdk } => {
-            check_env_bound().context("Failed to check environment variables")?;
+            check_env_bound(&jdk_manager).context("Failed to check environment variables")?;
             let jdk_major =
                 load_default(&config, jdk).context("Failed to load default JDK binding")?;
-            jdk_manager::symlink_jdk_path(jdk_major)
+            jdk_manager
+                .symlink_jdk_path(jdk_major)
                 .context("Failed to overwrite symlink with JDK binding")?;
-            let jdk_version =
-                jdk_manager::get_jdk_version(jdk_major).context("Failed to get JDK version")?;
+            let jdk_version = jdk_manager
+                .get_jdk_version(jdk_major)
+                .context("Failed to get JDK version")?;
             eprintln!("{}", format!("Now using JDK {}", jdk_version).green());
         }
         Subcommand::Update { check, jdk } => {
-            let majors = load_jdk_list(&config, jdk).context("Failed to load JDK list")?;
-            let versions = jdk_manager::map_available_jdk_versions(&majors);
+            let majors =
+                load_jdk_list(&jdk_manager, &config, jdk).context("Failed to load JDK list")?;
+            let versions = jdk_manager.map_available_jdk_versions(&majors);
             let mut update_versions = Vec::new();
 
             for major in majors {
                 if let Some((_, version)) = versions.iter().filter(|(x, _)| *x == major).next() {
                     info!("Checking latest version of {}", version);
-                    let latest = adoptjdk::get_latest_jdk_version(major)
+                    let latest_opt = api
+                        .get_latest_jdk_version(major)
                         .context("Failed to get latest JDK version")?;
+                    let latest = match latest_opt {
+                        Some(s) => s,
+                        None => continue,
+                    };
                     debug!("Latest version of {} is {}", version, latest);
                     if latest != *version {
                         println!(
@@ -174,18 +199,21 @@ fn main_for_result(args: Jpre) -> Result<()> {
             if !check {
                 for major in update_versions {
                     info!("Updating to latest version of {}", major);
-                    jdk_manager::update_jdk(major).context("Failed to update JDK")?;
+                    jdk_manager
+                        .update_jdk(major)
+                        .context("Failed to update JDK")?;
                 }
             }
         }
         Subcommand::List {} => {
-            let majors =
-                jdk_manager::get_all_jdk_majors().context("Failed to load all installed JDKs")?;
+            let majors = jdk_manager
+                .get_all_jdk_majors()
+                .context("Failed to load all installed JDKs")?;
             if majors.is_empty() {
                 eprintln!("{}", "No JDKs installed.".yellow());
                 return Ok(());
             }
-            let versions = jdk_manager::map_available_jdk_versions(&majors);
+            let versions = jdk_manager.map_available_jdk_versions(&majors);
             for (major, version) in versions {
                 println!(
                     "{}: {}",
@@ -195,13 +223,17 @@ fn main_for_result(args: Jpre) -> Result<()> {
             }
         }
         Subcommand::Current {} => {
-            check_env_bound().context("Failed to check environment variables")?;
-            let jdk_version = jdk_manager::get_current_jdk().unwrap_or_else(|_| "".to_string());
+            check_env_bound(&jdk_manager).context("Failed to check environment variables")?;
+            let jdk_version = jdk_manager
+                .get_current_jdk()
+                .unwrap_or_else(|_| "".to_string());
             println!("{}", jdk_version.green());
         }
         Subcommand::Default { jdk } => {
             if let Some(jdk_major) = jdk {
-                jdk_manager::get_jdk_path(jdk_major).context("Failed to get JDK path")?;
+                jdk_manager
+                    .get_jdk_path(jdk_major)
+                    .context("Failed to get JDK path")?;
                 config.set_default(jdk_major);
                 config.save().context("Failed to save config")?;
                 println!(
@@ -220,12 +252,13 @@ fn main_for_result(args: Jpre) -> Result<()> {
             }
         }
         Subcommand::JavaHome {} => {
-            let symlink_location =
-                jdk_manager::get_symlink_location().context("Failed to get symlink binding")?;
+            let symlink_location = jdk_manager
+                .get_symlink_location()
+                .context("Failed to get symlink binding")?;
             if !symlink_location.exists() {
                 // Initialize with default
                 if let Ok(default) = config.resolve_default() {
-                    jdk_manager::symlink_jdk_path(default)?;
+                    jdk_manager.symlink_jdk_path(default)?;
                 }
             }
             println!(
