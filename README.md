@@ -4,7 +4,7 @@ java-preloader-reloadeder
 
 Replacement for my old [gist](https://gist.github.com/octylFractal/d85e0b160d8be75dbca29910a2b34f34).
 
-Downloads JDKs from AdoptOpenJDK into `<cache dir>/jpre/jdks`, then sets a symlink to the currently active JDK.
+Downloads JDKs from Adoptium into `<cache dir>/jpre/jdks`, then sets a symlink to the currently active JDK.
 The symlinks are per-TTY (which usually implies per-shell), and stored in the Rust-std-determined temporary folder,
 which is usually `$TMPDIR` or `/tmp`.
 
@@ -24,7 +24,7 @@ hash -r
 Note that if you do not set a default JDK, the symlinked path will lead nowhere!
 
 # Usage
-Run `jpre use 11`, this downloads JDK 11 from AdoptOpenJDK and makes it the active JDK.
+Run `jpre use 11`, this downloads JDK 11 from Adoptium and makes it the active JDK.
 Other major versions can be downloaded and configured using `jpre use <major>`.
 The default JDK can be set using `jpre default <major>`.
 
