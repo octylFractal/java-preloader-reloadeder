@@ -1,7 +1,7 @@
 use std::ffi::CStr;
 use std::fs::{create_dir_all, File};
 use std::io;
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use indicatif::{MultiProgress, ProgressDrawTarget};
@@ -14,6 +14,7 @@ use crate::api::def::{JdkFetchApi, JdkFetchError};
 use crate::api::http_failure::handle_response_fail;
 use crate::content_disposition_parser::parse_filename;
 use crate::progress::new_progress_bar;
+use crate::release_file_parser::extract_java_version;
 
 static BASE_PATH: Lazy<PathBuf> =
     Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
@@ -28,9 +29,7 @@ pub enum JdkManagerError {
         source: std::io::Error,
     },
     #[error("{message}")]
-    Parsing {
-        message: String,
-    },
+    Parsing { message: String },
     #[error("{message}")]
     Fetch {
         message: String,
@@ -123,10 +122,20 @@ impl<A: JdkFetchApi> JdkManager<A> {
             debug!("No release file exists in JDK {}", major);
             return None;
         }
-        let config = std::fs::read_to_string(&release)
-            .map_err(|e| JdkManagerError::io("Failed to read release file", e))
-            .and_then(|data| extract_java_version(data.as_str(), &release));
-        match config {
+        let rel_java_version = (|| {
+            let file = std::fs::File::open(&release)
+                .map_err(|e| JdkManagerError::io("Failed to open release file", e))?;
+            let reader = std::io::BufReader::new(file).lines();
+            extract_java_version(reader)
+                .map_err(|e| JdkManagerError::io("Failed to read release file", e))?
+                .ok_or_else(|| JdkManagerError::Parsing {
+                    message: format!(
+                        "No JAVA_VERSION field found in release file '{}'",
+                        release.display()
+                    ),
+                })
+        })();
+        match rel_java_version {
             Ok(s) => Some(s),
             Err(error) => {
                 debug!("{:?}", error);
@@ -346,41 +355,4 @@ impl<A: JdkFetchApi> JdkManager<A> {
 
         all_bars.join().unwrap();
     }
-}
-
-fn extract_java_version<'a>(text: &'a str, release: &PathBuf) -> JdkManagerResult<String> {
-    let lines: Vec<&'a str> = text.lines()
-        .filter_map(|line| {
-            let trimmed: &'a str = line.trim();
-            if !trimmed.starts_with("JAVA_VERSION") {
-                return None;
-            }
-
-            let index = match trimmed.find('=') {
-                None => return None,
-                Some(i) => i
-            };
-
-            let mut value = &trimmed[(index + 1)..];
-            if value.starts_with('"') {
-                value = &value[1..];
-            }
-            if value.ends_with('"') {
-                value = &value[..value.len()-1];
-            }
-
-            return Some(value);
-        })
-        .collect();
-
-    if lines.len() == 0 {
-        return Err(JdkManagerError::Parsing {
-            message: format!(
-                "No JAVA_VERSION field found in release file '{}'",
-                release.display()
-            )
-        });
-    }
-
-    return Ok(lines[0].to_string());
 }
