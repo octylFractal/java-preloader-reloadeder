@@ -18,7 +18,7 @@ mod config;
 mod content_disposition_parser;
 mod jdk_manager;
 mod progress;
-mod release_file_parser;
+mod util;
 
 #[derive(StructOpt)]
 #[structopt(name = "jpre", about = "A JDK management tool")]
@@ -47,6 +47,17 @@ enum Subcommand {
         #[structopt(help = "The JDK to update (major version only), 'all', or 'default'")]
         jdk: String,
     },
+    #[structopt(about = "Remove a downloaded JDK")]
+    Remove {
+        #[structopt(help = "The JDK to remove (major version only)")]
+        jdk: String,
+        #[structopt(
+            short,
+            long,
+            help = "Force delete the JDK, do not ask for confirmation"
+        )]
+        force: bool,
+    },
     #[structopt(about = "List downloaded JDKs")]
     List {},
     #[structopt(about = "Print currently active JDK version (full)")]
@@ -61,14 +72,14 @@ enum Subcommand {
     JavaHome {},
 }
 
-fn parse_jdk_or_keyword(s: String) -> Either<u8, String> {
+fn parse_jdk_or_keyword(s: &str) -> Either<u8, &str> {
     s.parse::<u8>()
         .map(Either::Left)
         .unwrap_or_else(|_| Either::Right(s))
 }
 
 fn load_default(config: &Configuration, jdk: String) -> Result<u8> {
-    let jdk_or_keyword = parse_jdk_or_keyword(jdk);
+    let jdk_or_keyword = parse_jdk_or_keyword(jdk.as_str());
     match jdk_or_keyword {
         Either::Left(jdk_major) => Ok(jdk_major),
         Either::Right(unknown) => {
@@ -86,7 +97,7 @@ fn load_jdk_list(
     config: &Configuration,
     jdk: String,
 ) -> Result<Vec<u8>> {
-    let jdk_or_keyword = parse_jdk_or_keyword(jdk);
+    let jdk_or_keyword = parse_jdk_or_keyword(jdk.as_str());
     match jdk_or_keyword {
         Either::Left(jdk_major) => Ok(vec![jdk_major]),
         Either::Right(unknown) => {
@@ -204,6 +215,25 @@ fn main_for_result(args: Jpre) -> Result<()> {
                         .update_jdk(major)
                         .context("Failed to update JDK")?;
                 }
+            }
+        }
+        Subcommand::Remove { jdk, force } => {
+            check_env_bound(&jdk_manager).context("Failed to check environment variables")?;
+            let jdk_major = match parse_jdk_or_keyword(jdk.as_str()) {
+                Either::Left(jdk_major) => jdk_major,
+                Either::Right(unknown) => {
+                    return Err(anyhow!("Not a JDK major version: {}", unknown));
+                }
+            };
+            let jdk_version = jdk_manager.get_jdk_version(jdk_major).unwrap_or(jdk);
+            let deleted = jdk_manager
+                .delete_jdk_path(jdk_major, force)
+                .context("Failed to remove JDK directory")?;
+            if deleted {
+                eprintln!(
+                    "{}",
+                    format!("Successfully removed JDK {}", jdk_version).green()
+                );
             }
         }
         Subcommand::List {} => {

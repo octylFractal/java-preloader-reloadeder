@@ -14,7 +14,7 @@ use crate::api::def::{JdkFetchApi, JdkFetchError};
 use crate::api::http_failure::handle_response_fail;
 use crate::content_disposition_parser::parse_filename;
 use crate::progress::new_progress_bar;
-use crate::release_file_parser::extract_java_version;
+use crate::util::{extract_java_version, is_symlink};
 
 static BASE_PATH: Lazy<PathBuf> =
     Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
@@ -197,17 +197,125 @@ impl<A: JdkFetchApi> JdkManager<A> {
         let symlink = self
             .get_symlink_location()
             .map_err(|e| JdkManagerError::sub("Failed to get symlink location", e))?;
-        if symlink.symlink_metadata().is_ok() {
-            std::fs::remove_file(&symlink)
-                .map_err(|e| JdkManagerError::io("Failed to remove old symlink", e))?;
-        }
-        std::os::unix::fs::symlink(path, symlink)
+        self.delete_symlink(&symlink)?;
+        std::os::unix::fs::symlink(path, &symlink)
             .map_err(|e| JdkManagerError::io("Failed to make new symlink", e))?;
         Ok(())
     }
 
+    pub fn delete_jdk_path(&self, major: u8, force: bool) -> JdkManagerResult<bool> {
+        let path = self.find_jdk_path(major);
+
+        if !path.exists() {
+            eprintln!("JDK {} is not installed", major);
+            return Ok(false);
+        }
+
+        // If the JDK requested for deletion is the current JDK we will remove the symlink as well
+        let symlink = match self.find_symlink_if_matches(&path) {
+            Ok(o) => o,
+            Err(e) => {
+                debug!("Failed to resolve symlink: {:?}", e);
+                None
+            }
+        };
+
+        if force {
+            debug!("Skipping confirmation, force flag specified");
+        } else {
+            if !console::Term::stderr().features().is_attended() {
+                return Err(JdkManagerError::generic("Not a TTY"));
+            }
+
+            // Confirm with the user its okay to delete this (as well as symlink if current jdk)
+            let word = if symlink.is_none() {
+                "directory"
+            } else {
+                "directories"
+            };
+            eprintln!("This operation will delete the following {}:", word);
+            eprintln!("\t{}", path.display());
+            if let Some(symlink) = &symlink {
+                eprintln!("\t{}", symlink.display());
+            }
+            eprint!("Is this okay? (y/N) ");
+
+            let key = console::Term::stderr().read_key();
+            // The prompt didn't include a newline
+            eprintln!();
+            if let Ok(k) = &key {
+                debug!("Registered key: {:?}", k);
+            }
+
+            match key {
+                // Only the 'y' key is considered 'yes'
+                Ok(console::Key::Char('y' | 'Y')) => {}
+                Err(e) => {
+                    debug!("Error retrieving keypress: {:?}", e);
+                    return Ok(false);
+                }
+                _ => return Ok(false),
+            }
+        }
+
+        if let Some(symlink) = &symlink {
+            match self.delete_symlink(&symlink) {
+                Ok(_) => {}
+                Err(e) => {
+                    debug!("Unable to find or remove symlink: {:?}", e);
+                }
+            }
+        }
+        std::fs::remove_dir_all(path)
+            .map_err(|e| JdkManagerError::io("Failed to delete directory", e))?;
+        Ok(true)
+    }
+
+    fn delete_symlink<P: AsRef<Path>>(&self, symlink: P) -> JdkManagerResult<()> {
+        let symlink = symlink.as_ref();
+        if is_symlink(symlink) {
+            std::fs::remove_file(&symlink)
+                .map_err(|e| JdkManagerError::io("Failed to remove symlink", e))?;
+        }
+        Ok(())
+    }
+
+    fn find_symlink_if_matches<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> JdkManagerResult<Option<PathBuf>> {
+        let current_symlink = self
+            .get_symlink_location()
+            .map_err(|e| JdkManagerError::sub("Failed to find current symlink", e))?;
+
+        if !is_symlink(&current_symlink) {
+            return Err(JdkManagerError::generic(
+                "Current JDK symlink found is not a symlink",
+            ));
+        }
+
+        let err_msg = "Failed to resolve symlink";
+        let base_path = path
+            .as_ref()
+            .canonicalize()
+            .map_err(|e| JdkManagerError::io(err_msg, e))?;
+        let base_symlink_path = current_symlink
+            .canonicalize()
+            .map_err(|e| JdkManagerError::io(err_msg, e))?;
+
+        if base_path == base_symlink_path {
+            Ok(Some(current_symlink))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn find_jdk_path(&self, major: u8) -> PathBuf {
+        BASE_PATH.join(major.to_string())
+    }
+
     pub fn get_jdk_path(&self, major: u8) -> JdkManagerResult<PathBuf> {
-        let path = BASE_PATH.join(major.to_string());
+        let path = self.find_jdk_path(major);
         if path.join(FINISHED_MARKER).exists() {
             return Ok(path);
         }
