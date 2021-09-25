@@ -18,6 +18,7 @@ mod config;
 mod content_disposition_parser;
 mod jdk_manager;
 mod progress;
+mod release_file_parser;
 
 #[derive(StructOpt)]
 #[structopt(name = "jpre", about = "A JDK management tool")]

@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs::{create_dir_all, File};
 use std::io;
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use indicatif::{MultiProgress, ProgressDrawTarget};
@@ -15,6 +14,7 @@ use crate::api::def::{JdkFetchApi, JdkFetchError};
 use crate::api::http_failure::handle_response_fail;
 use crate::content_disposition_parser::parse_filename;
 use crate::progress::new_progress_bar;
+use crate::release_file_parser::extract_java_version;
 
 static BASE_PATH: Lazy<PathBuf> =
     Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
@@ -29,11 +29,7 @@ pub enum JdkManagerError {
         source: std::io::Error,
     },
     #[error("{message}")]
-    Toml {
-        message: String,
-        #[source]
-        source: toml::de::Error,
-    },
+    Parsing { message: String },
     #[error("{message}")]
     Fetch {
         message: String,
@@ -53,13 +49,6 @@ pub enum JdkManagerError {
 impl JdkManagerError {
     fn io<S: Into<String>>(message: S, error: std::io::Error) -> JdkManagerError {
         JdkManagerError::Io {
-            message: message.into(),
-            source: error,
-        }
-    }
-
-    fn toml<S: Into<String>>(message: S, error: toml::de::Error) -> JdkManagerError {
-        JdkManagerError::Toml {
             message: message.into(),
             source: error,
         }
@@ -133,21 +122,21 @@ impl<A: JdkFetchApi> JdkManager<A> {
             debug!("No release file exists in JDK {}", major);
             return None;
         }
-        let config = std::fs::read_to_string(&release)
-            .map_err(|e| JdkManagerError::io("Failed to read release file", e))
-            .and_then(|data| {
-                toml::from_str::<HashMap<String, String>>(data.as_str()).map_err(|e| {
-                    JdkManagerError::toml(
-                        format!(
-                            "Failed to parse TOML from release file '{}'",
-                            release.display()
-                        ),
-                        e,
-                    )
+        let rel_java_version = (|| {
+            let file = std::fs::File::open(&release)
+                .map_err(|e| JdkManagerError::io("Failed to open release file", e))?;
+            let reader = std::io::BufReader::new(file).lines();
+            extract_java_version(reader)
+                .map_err(|e| JdkManagerError::io("Failed to read release file", e))?
+                .ok_or_else(|| JdkManagerError::Parsing {
+                    message: format!(
+                        "No JAVA_VERSION field found in release file '{}'",
+                        release.display()
+                    ),
                 })
-            });
-        match config {
-            Ok(map) => map.get("JAVA_VERSION").map(|v| v.clone()),
+        })();
+        match rel_java_version {
+            Ok(s) => Some(s),
             Err(error) => {
                 debug!("{:?}", error);
                 None
