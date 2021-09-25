@@ -6,6 +6,8 @@ pub enum JdkFetchError {
     HttpIo(#[from] attohttpc::Error),
     #[error("error from upstream: {message}")]
     Upstream { message: String },
+    #[error("{message}")]
+    Incompatible { message: String },
     #[error("unknown error: {message}")]
     Generic { message: String },
 }

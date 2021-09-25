@@ -11,38 +11,25 @@ pub struct AdoptiumApi {
 
 impl AdoptiumApi {
     fn get_jdk_url(&self, major: u8) -> JdkFetchResult<String> {
-        let arch = {
-            let env_arch = std::env::consts::ARCH;
-            match env_arch {
-                "x86" => Ok(env_arch),
-                "x86_64" => Ok("x64"),
-                _ => Err(JdkFetchError::Generic {
-                    message: format!("Unknown ARCH {}", env_arch),
-                }),
-            }
-        }?;
-        let os = {
-            let env_os = std::env::consts::OS;
-            match env_os {
-                "linux" => Ok(env_os),
-                "macos" => Ok("mac"),
-                _ => Err(JdkFetchError::Generic {
-                    message: format!("Unknown OS {}", env_os),
-                }),
-            }
-        }?;
+        let arch = get_arch_name()?;
+        let os = get_os_name()?;
         Ok(format!(
             "{}/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/{}?project=jdk",
             &self.base_url, major, os, arch, &self.vendor
         ))
     }
 
-    fn get_latest_jdk_version_url(&self, major: u8) -> String {
+    fn get_latest_jdk_version_url(&self, major: u8) -> JdkFetchResult<String> {
+        let os_name = get_os_name()?;
+        let arch_name = get_arch_name()?;
+
         // grabs a 10 item page containing the most recent version of [major, major+1)
         // EAs CAN get mixed in here, unfortunately
-        return format!(
+        return Ok(format!(
             "{}/info/release_versions\
-            ?page=0\
+            ?architecture={}\
+            &OS={}\
+            &page=0\
             &page_size=10\
             &release_type=ga\
             &sort_method=DEFAULT\
@@ -50,10 +37,12 @@ impl AdoptiumApi {
             &vendor={}\
             &version=%5B{}%2C{}%29",
             &self.base_url,
+            arch_name,
+            os_name,
             &self.vendor,
             major,
             major + 1,
-        );
+        ));
     }
 }
 
@@ -65,9 +54,8 @@ impl JdkFetchApi for AdoptiumApi {
     }
 
     fn get_latest_jdk_version(&self, major: u8) -> JdkFetchResult<Option<String>> {
-        let response = attohttpc::get(&self.get_latest_jdk_version_url(major))
-            .send()
-            .map_err(JdkFetchError::HttpIo)?;
+        let url = self.get_latest_jdk_version_url(major)?;
+        let response = attohttpc::get(&url).send().map_err(JdkFetchError::HttpIo)?;
         if !response.is_success() {
             if response.status().as_u16() == 404 {
                 return Ok(None);
@@ -113,4 +101,26 @@ struct JdkVersion {
 #[serde(rename_all = "lowercase")]
 enum Prerelease {
     EA,
+}
+
+fn get_os_name() -> JdkFetchResult<&'static str> {
+    let env_os = std::env::consts::OS;
+    match env_os {
+        "linux" => Ok(env_os),
+        "macos" => Ok("mac"),
+        _ => Err(JdkFetchError::Incompatible {
+            message: format!("Unsupported OS: {}", env_os),
+        }),
+    }
+}
+
+fn get_arch_name() -> JdkFetchResult<&'static str> {
+    let env_arch = std::env::consts::ARCH;
+    match env_arch {
+        "x86" => Ok(env_arch),
+        "x86_64" => Ok("x64"),
+        _ => Err(JdkFetchError::Incompatible {
+            message: format!("Unsupported architecture: {}", env_arch),
+        }),
+    }
 }

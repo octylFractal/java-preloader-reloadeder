@@ -126,7 +126,36 @@ fn check_env_bound(jdk_manager: &JdkManager<AdoptiumApi>) -> Result<()> {
     Ok(())
 }
 
+fn is_unsupported_system() -> bool {
+    let env_os = std::env::consts::OS;
+    match env_os {
+        "linux" | "macos" => {}
+        _ => {
+            eprintln!("{}", format!("jpre does not support OS: {}", env_os).red());
+            return true;
+        }
+    }
+
+    let env_arch = std::env::consts::ARCH;
+    match env_arch {
+        "x86" | "x86_64" => {}
+        _ => {
+            eprintln!(
+                "{}",
+                format!("jpre does not support architecture: {}", env_arch).red()
+            );
+            return true;
+        }
+    }
+
+    false
+}
+
 fn main() {
+    if is_unsupported_system() {
+        return;
+    }
+
     let args: Jpre = Jpre::from_args();
     if let Err(error) = main_for_result(args) {
         eprintln!("{}", format!("Error: {:?}", error).red());

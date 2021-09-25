@@ -34,7 +34,7 @@ pub enum JdkManagerError {
     Fetch {
         message: String,
         #[source]
-        source: JdkFetchError,
+        source: Option<JdkFetchError>,
     },
     #[error("unknown error: {message}")]
     Generic { message: String },
@@ -54,7 +54,7 @@ impl JdkManagerError {
         }
     }
 
-    fn fetch<S: Into<String>>(message: S, error: JdkFetchError) -> JdkManagerError {
+    fn fetch<S: Into<String>>(message: S, error: Option<JdkFetchError>) -> JdkManagerError {
         JdkManagerError::Fetch {
             message: message.into(),
             source: error,
@@ -221,11 +221,15 @@ impl<A: JdkFetchApi> JdkManager<A> {
         let response = self
             .api
             .get_latest_jdk_binary(major)
-            .map_err(|e| JdkManagerError::fetch("Failed to get latest JDK binary", e))?;
+            .map_err(|e| JdkManagerError::fetch("Failed to get latest JDK binary", Some(e)))?;
+        // Custom simpler error message for most common failure
+        if response.status() == attohttpc::StatusCode::NOT_FOUND {
+            return Err(JdkManagerError::fetch("JDK version not found", None));
+        }
         if !response.is_success() {
             return Err(JdkManagerError::fetch(
                 "",
-                handle_response_fail(response, "Failed to get JDK binary"),
+                Some(handle_response_fail(response, "Failed to get JDK binary")),
             ));
         }
 
