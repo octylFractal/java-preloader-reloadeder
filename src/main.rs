@@ -165,7 +165,7 @@ fn main_for_result(args: Jpre) -> Result<()> {
             let mut update_versions = Vec::new();
 
             for major in majors {
-                if let Some((_, version)) = versions.iter().filter(|(x, _)| *x == major).next() {
+                if let Some((_, version)) = versions.iter().find(|(x, _)| *x == major) {
                     info!("Checking latest version of {}", version);
                     let latest_opt = api
                         .get_latest_jdk_version(major)

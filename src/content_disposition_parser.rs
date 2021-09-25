@@ -6,14 +6,14 @@ const FILENAME: &str = "filename=";
 const FILENAME_EXT: &str = "filename*=";
 
 pub fn parse_filename(header: &str) -> Result<String> {
-    header.split(";")
+    header.split(';')
         .filter_map(|x| {
             let trimmed = x.trim();
             if !trimmed.starts_with("filename") {
                 return None;
             }
-            let actual_filename = if trimmed.starts_with(FILENAME) {
-                let result = parse_filename_value(&trimmed[FILENAME.len()..]);
+            let actual_filename = if let Some(suffix) = trimmed.strip_prefix(FILENAME) {
+                let result = parse_filename_value(suffix);
                 if result.is_err() {
                     return Some(result);
                 }
@@ -34,7 +34,7 @@ pub fn parse_filename(header: &str) -> Result<String> {
 
 static TOKEN_RE: Lazy<Regex> = Lazy::new(|| Regex::new("^[!#$%&'*+.0-9A-Z^_`a-z|~-]+$").unwrap());
 static QUOTED_TEXT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new("^([^\x00-\x1F\x7F\"]|[\r\n\t ]|\\\")+$").unwrap());
+    Lazy::new(|| Regex::new("^([^\x00-\x1F\x7F\"]|[\r\n\t ]|\")+$").unwrap());
 
 // A REALLY BAD content-disposition parser
 // Didn't need to work very well so it is likely to break / accept invalid filenames
@@ -50,5 +50,5 @@ fn parse_filename_value(value: &str) -> Result<String> {
     if !QUOTED_TEXT_RE.is_match(trimmed) {
         return Err(anyhow!("Quoted filename doesn't match TEXT regex"));
     }
-    return Ok(value.replace("\\\"", "\""));
+    Ok(value.replace("\\\"", "\""))
 }

@@ -95,7 +95,7 @@ impl<A: JdkFetchApi> JdkManager<A> {
         let tty_as_name = tty.replace('/', "-");
         create_dir_all(&*BY_TTY)
             .map_err(|e| JdkManagerError::io("Failed to create by-tty directory", e))?;
-        return Ok(BY_TTY.join(tty_as_name));
+        Ok(BY_TTY.join(tty_as_name))
     }
 
     pub fn get_current_jdk(&self) -> JdkManagerResult<String> {
@@ -103,12 +103,12 @@ impl<A: JdkFetchApi> JdkManager<A> {
         let actual = symlink
             .read_link()
             .map_err(|e| JdkManagerError::io("No current JDK detected", e))?;
-        return actual
+        actual
             .file_name()
             .and_then(|s| s.to_str())
             .and_then(|s| s.parse::<u8>().ok())
             .and_then(|m| self.get_jdk_version(m))
-            .ok_or_else(|| JdkManagerError::generic("Not linked to an actual JDK"));
+            .ok_or_else(|| JdkManagerError::generic("Not linked to an actual JDK"))
     }
 
     pub fn get_jdk_version(&self, major: u8) -> Option<String> {
@@ -152,7 +152,7 @@ impl<A: JdkFetchApi> JdkManager<A> {
                 return Ok(Vec::new());
             }
         }
-        return read_dir_result
+        read_dir_result
             .map_err(|e| JdkManagerError::io("Failed to read base directory", e))?
             .map(|res| {
                 res.map(|e| {
@@ -175,10 +175,10 @@ impl<A: JdkFetchApi> JdkManager<A> {
                     Err(err) => Some(Err(err)),
                 }
             })
-            .collect();
+            .collect()
     }
 
-    pub fn map_available_jdk_versions(&self, majors: &Vec<u8>) -> Vec<(u8, String)> {
+    pub fn map_available_jdk_versions(&self, majors: &[u8]) -> Vec<(u8, String)> {
         let mut vec: Vec<(u8, String)> = majors
             .iter()
             .filter_map(|jdk_major| {
@@ -187,7 +187,7 @@ impl<A: JdkFetchApi> JdkManager<A> {
             })
             .collect();
         vec.sort_by_key(|v| v.0);
-        return vec;
+        vec
     }
 
     pub fn symlink_jdk_path(&self, major: u8) -> JdkManagerResult<()> {
@@ -213,7 +213,7 @@ impl<A: JdkFetchApi> JdkManager<A> {
         }
 
         self.update_jdk(major)?;
-        return Ok(path);
+        Ok(path)
     }
 
     pub fn update_jdk(&self, major: u8) -> JdkManagerResult<()> {
@@ -264,12 +264,12 @@ impl<A: JdkFetchApi> JdkManager<A> {
                     Ok(())
                 }
             })?;
-        return Ok(());
+        Ok(())
     }
 
     fn finish_extract(
         &self,
-        path: &PathBuf,
+        path: &Path,
         response: attohttpc::Response,
         url: String,
         temporary_dir: &TempDir,
@@ -295,7 +295,7 @@ impl<A: JdkFetchApi> JdkManager<A> {
             .map(|res| res.map(|e| e.path()))
             .filter(|r| match r {
                 Ok(p) => match p.file_name() {
-                    Some(name) => !name.to_string_lossy().starts_with("."),
+                    Some(name) => !name.to_string_lossy().starts_with('.'),
                     _ => true,
                 },
                 _ => true,

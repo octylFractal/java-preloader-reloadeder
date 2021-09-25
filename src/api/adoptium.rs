@@ -31,10 +31,10 @@ impl AdoptiumApi {
                 }),
             }
         }?;
-        return Ok(format!(
+        Ok(format!(
             "{}/binary/latest/{}/ga/{}/{}/jdk/hotspot/normal/{}?project=jdk",
             &self.base_url, major, os, arch, &self.vendor
-        ));
+        ))
     }
 
     fn get_latest_jdk_version_url(&self, major: u8) -> String {
@@ -93,7 +93,7 @@ impl JdkFetchApi for AdoptiumApi {
             Some(index) => (&base_version[..index]).to_string(),
             None => base_version.to_string(),
         };
-        return Ok(Some(fixed_version));
+        Ok(Some(fixed_version))
     }
 }
 

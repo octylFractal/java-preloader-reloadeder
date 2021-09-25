@@ -25,7 +25,7 @@ impl Configuration {
                 _ => Err(err),
             })
             .context("failed to read from config file")?;
-        Ok(toml::from_str(ser.as_str()).context("failed to de-serialize as TOML")?)
+        toml::from_str(ser.as_str()).context("failed to de-serialize as TOML")
     }
 
     pub fn resolve_default(&self) -> Result<u8> {
