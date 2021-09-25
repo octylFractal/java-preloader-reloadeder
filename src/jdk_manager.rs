@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs::{create_dir_all, File};
 use std::io;
@@ -29,10 +28,8 @@ pub enum JdkManagerError {
         source: std::io::Error,
     },
     #[error("{message}")]
-    Toml {
+    Parsing {
         message: String,
-        #[source]
-        source: toml::de::Error,
     },
     #[error("{message}")]
     Fetch {
@@ -53,13 +50,6 @@ pub enum JdkManagerError {
 impl JdkManagerError {
     fn io<S: Into<String>>(message: S, error: std::io::Error) -> JdkManagerError {
         JdkManagerError::Io {
-            message: message.into(),
-            source: error,
-        }
-    }
-
-    fn toml<S: Into<String>>(message: S, error: toml::de::Error) -> JdkManagerError {
-        JdkManagerError::Toml {
             message: message.into(),
             source: error,
         }
@@ -135,19 +125,9 @@ impl<A: JdkFetchApi> JdkManager<A> {
         }
         let config = std::fs::read_to_string(&release)
             .map_err(|e| JdkManagerError::io("Failed to read release file", e))
-            .and_then(|data| {
-                toml::from_str::<HashMap<String, String>>(data.as_str()).map_err(|e| {
-                    JdkManagerError::toml(
-                        format!(
-                            "Failed to parse TOML from release file '{}'",
-                            release.display()
-                        ),
-                        e,
-                    )
-                })
-            });
+            .and_then(|data| extract_java_version(data.as_str(), &release));
         match config {
-            Ok(map) => map.get("JAVA_VERSION").map(|v| v.clone()),
+            Ok(s) => Some(s),
             Err(error) => {
                 debug!("{:?}", error);
                 None
@@ -366,4 +346,41 @@ impl<A: JdkFetchApi> JdkManager<A> {
 
         all_bars.join().unwrap();
     }
+}
+
+fn extract_java_version<'a>(text: &'a str, release: &PathBuf) -> JdkManagerResult<String> {
+    let lines: Vec<&'a str> = text.lines()
+        .filter_map(|line| {
+            let trimmed: &'a str = line.trim();
+            if !trimmed.starts_with("JAVA_VERSION") {
+                return None;
+            }
+
+            let index = match trimmed.find('=') {
+                None => return None,
+                Some(i) => i
+            };
+
+            let mut value = &trimmed[(index + 1)..];
+            if value.starts_with('"') {
+                value = &value[1..];
+            }
+            if value.ends_with('"') {
+                value = &value[..value.len()-1];
+            }
+
+            return Some(value);
+        })
+        .collect();
+
+    if lines.len() == 0 {
+        return Err(JdkManagerError::Parsing {
+            message: format!(
+                "No JAVA_VERSION field found in release file '{}'",
+                release.display()
+            )
+        });
+    }
+
+    return Ok(lines[0].to_string());
 }
