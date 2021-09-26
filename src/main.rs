@@ -60,6 +60,8 @@ enum Subcommand {
     },
     #[structopt(about = "List downloaded JDKs")]
     List {},
+    #[structopt(about = "List JDKs available to download")]
+    Available {},
     #[structopt(about = "Print currently active JDK version (full)")]
     Current {},
     #[structopt(about = "Configure the default JDK")]
@@ -137,7 +139,36 @@ fn check_env_bound(jdk_manager: &JdkManager<AdoptiumApi>) -> Result<()> {
     Ok(())
 }
 
+fn is_unsupported_system() -> bool {
+    let env_os = std::env::consts::OS;
+    match env_os {
+        "linux" | "macos" => {}
+        _ => {
+            eprintln!("{}", format!("jpre does not support OS: {}", env_os).red());
+            return true;
+        }
+    }
+
+    let env_arch = std::env::consts::ARCH;
+    match env_arch {
+        "x86" | "x86_64" | "aarch64" => {}
+        _ => {
+            eprintln!(
+                "{}",
+                format!("jpre does not support architecture: {}", env_arch).red()
+            );
+            return true;
+        }
+    }
+
+    false
+}
+
 fn main() {
+    if is_unsupported_system() {
+        return;
+    }
+
     let args: Jpre = Jpre::from_args();
     if let Err(error) = main_for_result(args) {
         eprintln!("{}", format!("Error: {:?}", error).red());
@@ -251,6 +282,19 @@ fn main_for_result(args: Jpre) -> Result<()> {
                     major.to_string().cyan(),
                     version.to_string().green()
                 );
+            }
+        }
+        Subcommand::Available {} => {
+            let versions = jdk_manager.api.get_available_jdk_versions()?;
+            let mut sorted_versions = versions
+                .iter()
+                .filter_map(|version| parse_jdk_or_keyword(version).left())
+                .collect::<Vec<u8>>();
+            sorted_versions.sort_unstable();
+
+            println!("{}", "Major JDK versions available:".to_string().blue());
+            for version in sorted_versions {
+                println!(" {}", version.to_string().green());
             }
         }
         Subcommand::Current {} => {

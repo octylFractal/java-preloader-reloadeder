@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -6,6 +7,8 @@ pub enum JdkFetchError {
     HttpIo(#[from] attohttpc::Error),
     #[error("error from upstream: {message}")]
     Upstream { message: String },
+    #[error("{message}")]
+    Incompatible { message: String },
     #[error("unknown error: {message}")]
     Generic { message: String },
 }
@@ -18,4 +21,6 @@ pub trait JdkFetchApi {
     /// Get the latest JDK version, returning `None` if the API doesn't know about this major
     /// version.
     fn get_latest_jdk_version(&self, major: u8) -> JdkFetchResult<Option<String>>;
+
+    fn get_available_jdk_versions(&self) -> JdkFetchResult<HashSet<String>>;
 }
