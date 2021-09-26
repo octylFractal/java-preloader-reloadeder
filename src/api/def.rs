@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -20,4 +21,6 @@ pub trait JdkFetchApi {
     /// Get the latest JDK version, returning `None` if the API doesn't know about this major
     /// version.
     fn get_latest_jdk_version(&self, major: u8) -> JdkFetchResult<Option<String>>;
+
+    fn get_available_jdk_versions(&self) -> JdkFetchResult<HashSet<String>>;
 }

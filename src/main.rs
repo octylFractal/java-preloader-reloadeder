@@ -49,6 +49,8 @@ enum Subcommand {
     },
     #[structopt(about = "List downloaded JDKs")]
     List {},
+    #[structopt(about = "List JDKs available to download")]
+    Available {},
     #[structopt(about = "Print currently active JDK version (full)")]
     Current {},
     #[structopt(about = "Configure the default JDK")]
@@ -61,14 +63,14 @@ enum Subcommand {
     JavaHome {},
 }
 
-fn parse_jdk_or_keyword(s: String) -> Either<u8, String> {
+fn parse_jdk_or_keyword(s: &str) -> Either<u8, &str> {
     s.parse::<u8>()
         .map(Either::Left)
         .unwrap_or_else(|_| Either::Right(s))
 }
 
 fn load_default(config: &Configuration, jdk: String) -> Result<u8> {
-    let jdk_or_keyword = parse_jdk_or_keyword(jdk);
+    let jdk_or_keyword = parse_jdk_or_keyword(jdk.as_str());
     match jdk_or_keyword {
         Either::Left(jdk_major) => Ok(jdk_major),
         Either::Right(unknown) => {
@@ -86,7 +88,7 @@ fn load_jdk_list(
     config: &Configuration,
     jdk: String,
 ) -> Result<Vec<u8>> {
-    let jdk_or_keyword = parse_jdk_or_keyword(jdk);
+    let jdk_or_keyword = parse_jdk_or_keyword(jdk.as_str());
     match jdk_or_keyword {
         Either::Left(jdk_major) => Ok(vec![jdk_major]),
         Either::Right(unknown) => {
@@ -250,6 +252,19 @@ fn main_for_result(args: Jpre) -> Result<()> {
                     major.to_string().cyan(),
                     version.to_string().green()
                 );
+            }
+        }
+        Subcommand::Available {} => {
+            let versions = jdk_manager.api.get_available_jdk_versions()?;
+            let mut sorted_versions = versions
+                .iter()
+                .filter_map(|version| parse_jdk_or_keyword(version).left())
+                .collect::<Vec<u8>>();
+            sorted_versions.sort_unstable();
+
+            println!("{}", "Major JDK versions available:".to_string().blue());
+            for version in sorted_versions {
+                println!(" {}", version.to_string().green());
             }
         }
         Subcommand::Current {} => {
