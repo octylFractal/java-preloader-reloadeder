@@ -86,7 +86,7 @@ const FINISHED_MARKER: &str = ".jdk_marker";
 impl<A: JdkFetchApi> JdkManager<A> {
     pub fn get_symlink_location(&self) -> JdkManagerResult<PathBuf> {
         // Specifically check stderr, as stdout is likely to be redirected
-        if !console::Term::stderr().features().is_attended() {
+        if !console::user_attended_stderr() {
             return Err(JdkManagerError::generic("Not a TTY"));
         }
         let tty = unsafe { CStr::from_ptr(libc::ttyname(libc::STDERR_FILENO)) }
@@ -212,50 +212,15 @@ impl<A: JdkFetchApi> JdkManager<A> {
         }
 
         // If the JDK requested for deletion is the current JDK we will remove the symlink as well
-        let symlink = match self.find_symlink_if_matches(&path) {
-            Ok(o) => o,
-            Err(e) => {
-                debug!("Failed to resolve symlink: {:?}", e);
-                None
-            }
-        };
+        let symlink = self.find_symlink_if_matches(&path).unwrap_or_else(|e| {
+            debug!("Failed to resolve symlink: {:?}", e);
+            None
+        });
 
         if force {
             debug!("Skipping confirmation, force flag specified");
-        } else {
-            if !console::Term::stderr().features().is_attended() {
-                return Err(JdkManagerError::generic("Not a TTY"));
-            }
-
-            // Confirm with the user its okay to delete this (as well as symlink if current jdk)
-            let word = if symlink.is_none() {
-                "directory"
-            } else {
-                "directories"
-            };
-            eprintln!("This operation will delete the following {}:", word);
-            eprintln!("\t{}", path.display());
-            if let Some(symlink) = &symlink {
-                eprintln!("\t{}", symlink.display());
-            }
-            eprint!("Is this okay? (y/N) ");
-
-            let key = console::Term::stderr().read_key();
-            // The prompt didn't include a newline
-            eprintln!();
-            if let Ok(k) = &key {
-                debug!("Registered key: {:?}", k);
-            }
-
-            match key {
-                // Only the 'y' key is considered 'yes'
-                Ok(console::Key::Char('y' | 'Y')) => {}
-                Err(e) => {
-                    debug!("Error retrieving keypress: {:?}", e);
-                    return Ok(false);
-                }
-                _ => return Ok(false),
-            }
+        } else if !JdkManager::<A>::confirm_delete(&path, &symlink)? {
+            return Ok(false);
         }
 
         if let Some(symlink) = &symlink {
@@ -271,13 +236,55 @@ impl<A: JdkFetchApi> JdkManager<A> {
         Ok(true)
     }
 
+    fn confirm_delete<P: AsRef<Path>>(
+        path: P,
+        symlink: &Option<PathBuf>,
+    ) -> JdkManagerResult<bool> {
+        if !console::user_attended_stderr() {
+            return Err(JdkManagerError::generic("Not a TTY"));
+        }
+
+        // Confirm with the user its okay to delete this (as well as symlink if current jdk)
+        let word = if symlink.is_none() {
+            "directory"
+        } else {
+            "directories"
+        };
+        eprintln!("This operation will delete the following {}:", word);
+        eprintln!("\t{}", path.as_ref().display());
+        if let Some(symlink) = &symlink {
+            eprintln!("\t{}", symlink.display());
+        }
+        eprint!("Is this okay? (y/N) ");
+
+        let key = console::Term::stderr().read_key();
+        // The prompt didn't include a newline
+        eprintln!();
+        if let Ok(k) = &key {
+            debug!("Registered key: {:?}", k);
+        }
+
+        match key {
+            Ok(k) => {
+                debug!("Registered key: {:?}", k);
+                // Only the 'y' key is considered 'yes'
+                Ok(matches!(k, console::Key::Char('y' | 'Y')))
+            }
+            Err(e) => {
+                debug!("Error retrieving keypress: {:?}", e);
+                Ok(false)
+            }
+        }
+    }
+
     fn delete_symlink<P: AsRef<Path>>(&self, symlink: P) -> JdkManagerResult<()> {
         let symlink = symlink.as_ref();
         if is_symlink(symlink) {
             std::fs::remove_file(&symlink)
-                .map_err(|e| JdkManagerError::io("Failed to remove symlink", e))?;
+                .map_err(|e| JdkManagerError::io("Failed to remove symlink", e))
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     fn find_symlink_if_matches<P: AsRef<Path>>(
@@ -294,20 +301,17 @@ impl<A: JdkFetchApi> JdkManager<A> {
             ));
         }
 
-        let err_msg = "Failed to resolve symlink";
-        let base_path = path
-            .as_ref()
-            .canonicalize()
-            .map_err(|e| JdkManagerError::io(err_msg, e))?;
-        let base_symlink_path = current_symlink
-            .canonicalize()
-            .map_err(|e| JdkManagerError::io(err_msg, e))?;
+        (|| {
+            let base_path = path.as_ref().canonicalize()?;
+            let base_symlink_path = current_symlink.canonicalize()?;
 
-        if base_path == base_symlink_path {
-            Ok(Some(current_symlink))
-        } else {
-            Ok(None)
-        }
+            if base_path == base_symlink_path {
+                Ok(Some(current_symlink))
+            } else {
+                Ok(None)
+            }
+        })()
+        .map_err(|e| JdkManagerError::io("Failed to resolve symlink", e))
     }
 
     pub fn find_jdk_path(&self, major: u8) -> PathBuf {
