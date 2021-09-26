@@ -117,7 +117,7 @@ fn get_os_name() -> JdkFetchResult<&'static str> {
 fn get_arch_name() -> JdkFetchResult<&'static str> {
     let env_arch = std::env::consts::ARCH;
     match env_arch {
-        "x86" => Ok(env_arch),
+        "x86" | "aarch64" => Ok(env_arch),
         "x86_64" => Ok("x64"),
         _ => Err(JdkFetchError::Incompatible {
             message: format!("Unsupported architecture: {}", env_arch),

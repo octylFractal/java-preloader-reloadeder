@@ -138,7 +138,7 @@ fn is_unsupported_system() -> bool {
 
     let env_arch = std::env::consts::ARCH;
     match env_arch {
-        "x86" | "x86_64" => {}
+        "x86" | "x86_64" | "aarch64" => {}
         _ => {
             eprintln!(
                 "{}",
