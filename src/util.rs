@@ -1,4 +1,5 @@
 use log::debug;
+use std::path::Path;
 
 pub(crate) fn extract_java_version<E>(
     mut lines: impl Iterator<Item = Result<String, E>>,
@@ -31,4 +32,14 @@ pub(crate) fn extract_java_version<E>(
             Some(Ok(value.to_string()))
         })
         .transpose()
+}
+
+pub(crate) fn is_symlink<P: AsRef<Path>>(symlink: P) -> bool {
+    // This is a copy of std::path::Path::is_symlink()
+    // currently marked unstable, but the parts that make up the function aren't
+    return symlink
+        .as_ref()
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
 }
