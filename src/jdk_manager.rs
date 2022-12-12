@@ -1,6 +1,4 @@
-use std::ffi::CStr;
 use std::fs::{create_dir_all, File};
-use std::io;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
@@ -15,13 +13,15 @@ use crate::api::http_failure::handle_response_fail;
 use crate::content_disposition_parser::parse_filename;
 use crate::progress::new_progress_bar;
 use crate::util::{extract_java_version, is_symlink};
+use crate::JPRE_JAVA_HOME;
 
 static BASE_PATH: Lazy<PathBuf> =
     Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
-static BY_TTY: Lazy<PathBuf> = Lazy::new(|| std::env::temp_dir().join("jpre-by-tty"));
 
 #[derive(Error, Debug)]
 pub enum JdkManagerError {
+    #[error("No JPRE_JAVA_HOME is set")]
+    NoJavaHome,
     #[error("{message}")]
     Io {
         message: String,
@@ -85,17 +85,15 @@ const FINISHED_MARKER: &str = ".jdk_marker";
 
 impl<A: JdkFetchApi> JdkManager<A> {
     pub fn get_symlink_location(&self) -> JdkManagerResult<PathBuf> {
-        // Specifically check stderr, as stdout is likely to be redirected
-        if !console::user_attended_stderr() {
-            return Err(JdkManagerError::generic("Not a TTY"));
-        }
-        let tty = unsafe { CStr::from_ptr(libc::ttyname(libc::STDERR_FILENO)) }
-            .to_str()
-            .expect("Filename is not UTF-8");
-        let tty_as_name = tty.replace('/', "-");
-        create_dir_all(&*BY_TTY)
-            .map_err(|e| JdkManagerError::io("Failed to create by-tty directory", e))?;
-        Ok(BY_TTY.join(tty_as_name))
+        let path = std::env::var_os(JPRE_JAVA_HOME)
+            .ok_or(JdkManagerError::NoJavaHome)
+            .map(PathBuf::from)?;
+        create_dir_all(
+            path.parent()
+                .expect("JPRE_JAVA_HOME shouldn't be at the root directory"),
+        )
+        .map_err(|e| JdkManagerError::io("Failed to create by-tty directory", e))?;
+        Ok(path)
     }
 
     pub fn get_current_jdk(&self) -> JdkManagerResult<String> {
@@ -123,9 +121,9 @@ impl<A: JdkFetchApi> JdkManager<A> {
             return None;
         }
         let rel_java_version = (|| {
-            let file = std::fs::File::open(&release)
+            let file = File::open(&release)
                 .map_err(|e| JdkManagerError::io("Failed to open release file", e))?;
-            let reader = std::io::BufReader::new(file).lines();
+            let reader = BufReader::new(file).lines();
             extract_java_version(reader)
                 .map_err(|e| JdkManagerError::io("Failed to read release file", e))?
                 .ok_or_else(|| JdkManagerError::Parsing {
@@ -412,7 +410,7 @@ impl<A: JdkFetchApi> JdkManager<A> {
                 },
                 _ => true,
             })
-            .collect::<Result<Vec<_>, io::Error>>()
+            .collect::<Result<Vec<_>, std::io::Error>>()
             .map_err(|e| JdkManagerError::io("Failed to read temp dir entry", e))?;
         let from_dir = if dir_entries.len() == 1 {
             if std::env::consts::OS == "macos" {

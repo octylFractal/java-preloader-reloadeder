@@ -5,6 +5,9 @@ use directories_next::ProjectDirs;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
+/// Environment variable name for the `JAVA_HOME` that the current environment's jpre is using.
+pub const JPRE_JAVA_HOME: &str = "JPRE_JAVA_HOME";
+
 pub static PROJECT_DIRS: Lazy<ProjectDirs> =
     Lazy::new(|| ProjectDirs::from("net", "octyl", "jpre").expect("No project dirs derived?"));
 

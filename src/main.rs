@@ -1,16 +1,18 @@
 #![deny(warnings)]
 
 use std::process::exit;
+use std::time::SystemTime;
 
 use anyhow::{anyhow, Context, Result};
 use colored::*;
 use either::Either;
 use log::{debug, info};
+use radix_fmt::radix_36;
 use structopt::StructOpt;
 
 use crate::api::adoptium::AdoptiumApi;
 use crate::api::def::JdkFetchApi;
-use crate::config::Configuration;
+use crate::config::{Configuration, JPRE_JAVA_HOME};
 use crate::jdk_manager::JdkManager;
 
 mod api;
@@ -59,17 +61,19 @@ enum Subcommand {
         force: bool,
     },
     #[structopt(about = "List downloaded JDKs")]
-    List {},
+    List,
     #[structopt(about = "Print currently active JDK version (full)")]
-    Current {},
+    Current,
     #[structopt(about = "Configure the default JDK")]
     Default {
         #[structopt(help = "The JDK to set as the default (major version only),\
                             or nothing to get the default")]
         jdk: Option<u8>,
     },
-    #[structopt(about = "Print the path to the JAVA_HOME symlink for the current TTY")]
-    JavaHome {},
+    #[structopt(about = "Print the path to the JAVA_HOME symlink for the current environment")]
+    JavaHome,
+    #[structopt(about = "Print the path to a randomly generated JAVA_HOME location")]
+    GenerateJavaHomeLocation,
 }
 
 fn parse_jdk_or_keyword(s: &str) -> Either<u8, &str> {
@@ -190,7 +194,7 @@ fn main_for_result(args: Jpre) -> Result<()> {
                         println!(
                             "{} {}",
                             "Update available:".green(),
-                            format!(
+                            format_args!(
                                 "{} -> {}",
                                 version.to_string().yellow(),
                                 latest.to_string().cyan()
@@ -299,6 +303,23 @@ fn main_for_result(args: Jpre) -> Result<()> {
                     .ok_or_else(|| anyhow!("Invalid symlink location"))?
                     .green()
             );
+        }
+        Subcommand::GenerateJavaHomeLocation => {
+            let time = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("system time should be after the unix epoch")
+                .as_millis();
+            // unique key formed from the current time (millis) and a random integer
+            let env_key = format!("{}_{}", radix_36(time), radix_36(rand::random::<u32>()));
+            println!(
+                "{}",
+                std::env::temp_dir()
+                    .join("jpre")
+                    .join("env")
+                    .join(env_key)
+                    .to_str()
+                    .context("un-representable temporary dir")?,
+            )
         }
     };
     Ok(())
