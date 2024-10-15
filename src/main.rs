@@ -6,6 +6,7 @@ use crate::command::list_distributions::ListDistributions;
 use crate::command::list_installed::ListInstalled;
 use crate::command::list_versions::ListVersions;
 use crate::command::remove_jdk::RemoveJdk;
+use crate::command::set_default::SetDefault;
 use crate::command::set_distribution::SetDistribution;
 use crate::command::update::UpdateInstalled;
 use crate::command::use_jdk::UseJdk;
@@ -52,6 +53,7 @@ enum JpreCommandEnum {
     ListVersions(ListVersions),
     ListInstalled(ListInstalled),
     SetDistribution(SetDistribution),
+    Default(SetDefault),
     Debug(Debug),
     Use(UseJdk),
     Remove(RemoveJdk),
