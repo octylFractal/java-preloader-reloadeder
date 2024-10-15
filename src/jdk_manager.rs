@@ -1,410 +1,413 @@
-use std::ffi::CStr;
-use std::fs::{create_dir_all, File};
-use std::io;
-use std::io::{BufRead, BufReader, Read};
-use std::path::{Path, PathBuf};
-
-use indicatif::{MultiProgress, ProgressDrawTarget};
-use log::debug;
-use once_cell::sync::Lazy;
-use tempdir::TempDir;
-use thiserror::Error;
-
-use crate::api::def::{JdkFetchApi, JdkFetchError};
-use crate::api::http_failure::handle_response_fail;
-use crate::content_disposition_parser::parse_filename;
+use crate::checksum_verifier::ChecksumVerifier;
+use crate::config::{JpreConfig, PROJECT_DIRS};
+use crate::error::ESResult;
+use crate::foojay::{
+    ArchiveType, ChecksumType, FoojayPackageInfo, FoojayPackageListInfo, FOOJAY_API,
+};
+use crate::http_client::new_http_client;
+use crate::java_version::key::VersionKey;
 use crate::progress::new_progress_bar;
-use crate::util::{extract_java_version, is_symlink};
+use derive_more::Display;
+use digest::Digest;
+use error_stack::{Context, Report, ResultExt};
+use indicatif::MultiProgress;
+use owo_colors::{OwoColorize, Stream};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::sync::LazyLock;
+use tempfile::TempDir;
+use tracing::warn;
+use ureq::Response;
+use crate::java_version::JavaVersion;
 
-static BASE_PATH: Lazy<PathBuf> =
-    Lazy::new(|| crate::config::PROJECT_DIRS.cache_dir().join("jdks"));
-static BY_TTY: Lazy<PathBuf> = Lazy::new(|| std::env::temp_dir().join("jpre-by-tty"));
+#[derive(Debug, Display)]
+pub struct JdkManagerError;
 
-#[derive(Error, Debug)]
-pub enum JdkManagerError {
-    #[error("{message}")]
-    Io {
-        message: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("{message}")]
-    Parsing { message: String },
-    #[error("{message}")]
-    Fetch {
-        message: String,
-        #[source]
-        source: JdkFetchError,
-    },
-    #[error("unknown error: {message}")]
-    Generic { message: String },
-    #[error("{message}")]
-    Sub {
-        message: String,
-        #[source]
-        source: Box<JdkManagerError>,
-    },
+impl Context for JdkManagerError {}
+
+static JDK_STORE_PATH: LazyLock<PathBuf> = LazyLock::new(|| PROJECT_DIRS.cache_dir().join("jdks"));
+static JDK_DOWNLOADS_PATH: LazyLock<PathBuf> =
+    LazyLock::new(|| PROJECT_DIRS.cache_dir().join("downloads"));
+
+// Why not '.jdk_marker'? Old jpre didn't emit the version number in the marker file, so we need to
+// use a new marker file to ensure we know which version of the JDK is installed.
+const JDK_VALID_MARKER_FILE_NAME: &str = ".jdk_marker_with_version";
+// We'll inspect the legacy one and use it as a valid JDK, but when updating we'll always overwrite.
+const LEGACY_JDK_MARKER_FILE_NAME: &str = ".jdk_marker";
+
+fn jdk_path(jdk: &VersionKey) -> PathBuf {
+    JDK_STORE_PATH.join(jdk.to_string())
 }
 
-impl JdkManagerError {
-    fn io<S: Into<String>>(message: S, error: std::io::Error) -> JdkManagerError {
-        JdkManagerError::Io {
-            message: message.into(),
-            source: error,
-        }
-    }
+pub static JDK_MANAGER: LazyLock<JdkManager> = LazyLock::new(JdkManager::new);
 
-    fn fetch<S: Into<String>>(message: S, error: JdkFetchError) -> JdkManagerError {
-        JdkManagerError::Fetch {
-            message: message.into(),
-            source: error,
-        }
-    }
-
-    fn generic<S: Into<String>>(message: S) -> JdkManagerError {
-        JdkManagerError::Generic {
-            message: message.into(),
-        }
-    }
-
-    fn sub<S: Into<String>>(message: S, error: JdkManagerError) -> JdkManagerError {
-        JdkManagerError::Sub {
-            message: message.into(),
-            source: Box::from(error),
-        }
-    }
+pub struct JdkManager {
+    client: ureq::Agent,
 }
 
-pub type JdkManagerResult<T> = Result<T, JdkManagerError>;
-
-pub struct JdkManager<A: JdkFetchApi> {
-    pub api: A,
-}
-
-const FINISHED_MARKER: &str = ".jdk_marker";
-
-impl<A: JdkFetchApi> JdkManager<A> {
-    pub fn get_symlink_location(&self) -> JdkManagerResult<PathBuf> {
-        // Specifically check stderr, as stdout is likely to be redirected
-        if !console::user_attended_stderr() {
-            return Err(JdkManagerError::generic("Not a TTY"));
+impl JdkManager {
+    pub fn new() -> Self {
+        Self {
+            client: new_http_client(),
         }
-        let tty = unsafe { CStr::from_ptr(libc::ttyname(libc::STDERR_FILENO)) }
-            .to_str()
-            .expect("Filename is not UTF-8");
-        let tty_as_name = tty.replace('/', "-");
-        create_dir_all(&*BY_TTY)
-            .map_err(|e| JdkManagerError::io("Failed to create by-tty directory", e))?;
-        Ok(BY_TTY.join(tty_as_name))
     }
 
-    pub fn get_current_jdk(&self) -> JdkManagerResult<String> {
-        let symlink = self.get_symlink_location()?;
-        let actual = symlink
-            .read_link()
-            .map_err(|e| JdkManagerError::io("No current JDK detected", e))?;
-        actual
-            .file_name()
-            .and_then(|s| s.to_str())
-            .and_then(|s| s.parse::<u8>().ok())
-            .and_then(|m| self.get_jdk_version(m))
-            .ok_or_else(|| JdkManagerError::generic("Not linked to an actual JDK"))
-    }
-
-    pub fn get_jdk_version(&self, major: u8) -> Option<String> {
-        let path = BASE_PATH.join(major.to_string());
-        if !path.join(FINISHED_MARKER).exists() {
-            debug!("No finished marker exists in JDK {}", major);
-            return None;
-        }
-        let release = path.join("release");
-        if !path.join("release").exists() {
-            debug!("No release file exists in JDK {}", major);
-            return None;
-        }
-        let rel_java_version = (|| {
-            let file = std::fs::File::open(&release)
-                .map_err(|e| JdkManagerError::io("Failed to open release file", e))?;
-            let reader = std::io::BufReader::new(file).lines();
-            extract_java_version(reader)
-                .map_err(|e| JdkManagerError::io("Failed to read release file", e))?
-                .ok_or_else(|| JdkManagerError::Parsing {
-                    message: format!(
-                        "No JAVA_VERSION field found in release file '{}'",
-                        release.display()
-                    ),
-                })
-        })();
-        match rel_java_version {
-            Ok(s) => Some(s),
-            Err(error) => {
-                debug!("{:?}", error);
-                None
+    pub fn get_installed_jdks(&self) -> ESResult<Vec<VersionKey>, JdkManagerError> {
+        let mut result = Vec::new();
+        for ent in std::fs::read_dir(&*JDK_STORE_PATH)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!("Could not read JDK store at {:?}", *JDK_STORE_PATH)
+            })?
+        {
+            let ent = ent
+                .change_context(JdkManagerError)
+                .attach_printable_lazy(|| {
+                    format!("Could not read entry in JDK store at {:?}", *JDK_STORE_PATH)
+                })?;
+            let file_name = ent.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            let Ok(key) = VersionKey::from_str(name) else {
+                continue;
+            };
+            let marker = ent.path().join(JDK_VALID_MARKER_FILE_NAME);
+            let legacy_marker = ent.path().join(LEGACY_JDK_MARKER_FILE_NAME);
+            if !marker.exists() && !legacy_marker.exists() {
+                continue;
             }
+            result.push(key);
         }
+        Ok(result)
     }
 
-    pub fn get_all_jdk_majors(&self) -> JdkManagerResult<Vec<u8>> {
-        let read_dir_result = BASE_PATH.read_dir();
-        if let Err(read_dir_error) = &read_dir_result {
-            if read_dir_error.kind() == std::io::ErrorKind::NotFound {
-                // ignore if we can't find the dir
-                return Ok(Vec::new());
-            }
-        }
-        read_dir_result
-            .map_err(|e| JdkManagerError::io("Failed to read base directory", e))?
-            .map(|res| {
-                res.map(|e| {
-                    e.path()
-                        .file_name()
-                        // This should be impossible
-                        .expect("cannot be missing file name")
-                        .to_str()
-                        // I don't really know if I should handle non-UTF-8
-                        .expect("Non-UTF8 filename encountered")
-                        .to_string()
-                })
-                .map_err(|e| JdkManagerError::io("Failed to read directory entry", e))
-            })
-            .filter_map(|res| {
-                match res {
-                    // map the parse error to None, otherwise get Some(Ok(u8))
-                    Ok(file_name) => file_name.parse::<u8>().ok().map(Ok),
-                    // map the actual errors back in
-                    Err(err) => Some(Err(err)),
-                }
-            })
-            .collect()
+    pub fn get_full_version(&self, jdk: &VersionKey) -> ESResult<Option<JavaVersion>, JdkManagerError> {
+        self.get_full_version_from_path(&jdk_path(jdk))
     }
 
-    pub fn map_available_jdk_versions(&self, majors: &[u8]) -> Vec<(u8, String)> {
-        let mut vec: Vec<(u8, String)> = majors
-            .iter()
-            .filter_map(|jdk_major| {
-                self.get_jdk_version(*jdk_major)
-                    .map(|version| (*jdk_major, version))
-            })
-            .collect();
-        vec.sort_by_key(|v| v.0);
-        vec
-    }
-
-    pub fn symlink_jdk_path(&self, major: u8) -> JdkManagerResult<()> {
-        let path = self
-            .get_jdk_path(major)
-            .map_err(|e| JdkManagerError::sub("Failed to get JDK path", e))?;
-        let symlink = self
-            .get_symlink_location()
-            .map_err(|e| JdkManagerError::sub("Failed to get symlink location", e))?;
-        self.delete_symlink(&symlink)?;
-        std::os::unix::fs::symlink(path, &symlink)
-            .map_err(|e| JdkManagerError::io("Failed to make new symlink", e))?;
-        Ok(())
-    }
-
-    pub fn delete_jdk_path(&self, major: u8, force: bool) -> JdkManagerResult<bool> {
-        let path = self.find_jdk_path(major);
-
-        if !path.exists() {
-            eprintln!("JDK {} is not installed", major);
-            return Ok(false);
-        }
-
-        // If the JDK requested for deletion is the current JDK we will remove the symlink as well
-        let symlink = self.find_symlink_if_matches(&path).unwrap_or_else(|e| {
-            debug!("Failed to resolve symlink: {:?}", e);
-            None
-        });
-
-        if force {
-            debug!("Skipping confirmation, force flag specified");
-        } else if !JdkManager::<A>::confirm_delete(&path, &symlink)? {
-            return Ok(false);
-        }
-
-        if let Some(symlink) = &symlink {
-            match self.delete_symlink(&symlink) {
-                Ok(_) => {}
-                Err(e) => {
-                    debug!("Unable to find or remove symlink: {:?}", e);
-                }
-            }
-        }
-        std::fs::remove_dir_all(path)
-            .map_err(|e| JdkManagerError::io("Failed to delete directory", e))?;
-        Ok(true)
-    }
-
-    fn confirm_delete<P: AsRef<Path>>(
-        path: P,
-        symlink: &Option<PathBuf>,
-    ) -> JdkManagerResult<bool> {
-        if !console::user_attended_stderr() {
-            return Err(JdkManagerError::generic("Not a TTY"));
-        }
-
-        // Confirm with the user its okay to delete this (as well as symlink if current jdk)
-        let word = if symlink.is_none() {
-            "directory"
-        } else {
-            "directories"
-        };
-        eprintln!("This operation will delete the following {}:", word);
-        eprintln!("\t{}", path.as_ref().display());
-        if let Some(symlink) = &symlink {
-            eprintln!("\t{}", symlink.display());
-        }
-        eprint!("Is this okay? (y/N) ");
-
-        let key = console::Term::stderr().read_key();
-        // The prompt didn't include a newline
-        eprintln!();
-        if let Ok(k) = &key {
-            debug!("Registered key: {:?}", k);
-        }
-
-        match key {
-            Ok(k) => {
-                debug!("Registered key: {:?}", k);
-                // Only the 'y' key is considered 'yes'
-                Ok(matches!(k, console::Key::Char('y' | 'Y')))
-            }
-            Err(e) => {
-                debug!("Error retrieving keypress: {:?}", e);
-                Ok(false)
-            }
-        }
-    }
-
-    fn delete_symlink<P: AsRef<Path>>(&self, symlink: P) -> JdkManagerResult<()> {
-        let symlink = symlink.as_ref();
-        if is_symlink(symlink) {
-            std::fs::remove_file(&symlink)
-                .map_err(|e| JdkManagerError::io("Failed to remove symlink", e))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn find_symlink_if_matches<P: AsRef<Path>>(
-        &self,
-        path: P,
-    ) -> JdkManagerResult<Option<PathBuf>> {
-        let current_symlink = self
-            .get_symlink_location()
-            .map_err(|e| JdkManagerError::sub("Failed to find current symlink", e))?;
-
-        if !is_symlink(&current_symlink) {
-            return Err(JdkManagerError::generic(
-                "Current JDK symlink found is not a symlink",
-            ));
-        }
-
-        (|| {
-            let base_path = path.as_ref().canonicalize()?;
-            let base_symlink_path = current_symlink.canonicalize()?;
-
-            if base_path == base_symlink_path {
-                Ok(Some(current_symlink))
-            } else {
-                Ok(None)
-            }
-        })()
-        .map_err(|e| JdkManagerError::io("Failed to resolve symlink", e))
-    }
-
-    pub fn find_jdk_path(&self, major: u8) -> PathBuf {
-        BASE_PATH.join(major.to_string())
-    }
-
-    pub fn get_jdk_path(&self, major: u8) -> JdkManagerResult<PathBuf> {
-        let path = self.find_jdk_path(major);
-        if path.join(FINISHED_MARKER).exists() {
-            return Ok(path);
-        }
-
-        self.update_jdk(major)?;
-        Ok(path)
-    }
-
-    pub fn update_jdk(&self, major: u8) -> JdkManagerResult<()> {
-        let path = BASE_PATH.join(major.to_string());
-        let response = self
-            .api
-            .get_latest_jdk_binary(major)
-            .map_err(|e| JdkManagerError::fetch("Failed to get latest JDK binary", e))?;
-        if !response.is_success() {
-            return Err(JdkManagerError::fetch(
-                "",
-                handle_response_fail(response, "Failed to get JDK binary"),
-            ));
-        }
-
-        let url = response
-            .headers()
-            .get(attohttpc::header::CONTENT_DISPOSITION)
-            .ok_or_else(|| JdkManagerError::generic("no content disposition"))
-            .map(|value| parse_filename(value.to_str().unwrap()).unwrap())?;
-        eprintln!("Extracting {}", url);
-        if path.exists() {
-            std::fs::remove_dir_all(&path).map_err(|e| {
-                JdkManagerError::io(
-                    format!("Unable to clean JDK folder ({})", path.display()),
-                    e,
-                )
-            })?;
-        }
-        create_dir_all(&path).map_err(|e| {
-            JdkManagerError::io(
-                format!(
-                    "Unable to create directories to JDK folder ({})",
-                    path.display()
-                ),
-                e,
-            )
-        })?;
-        let temporary_dir = TempDir::new_in(&*BASE_PATH, "jdk-download")
-            .map_err(|e| JdkManagerError::io("Failed to create temporary directory", e))?;
-        self.finish_extract(&path, response, url, &temporary_dir)
-            .and_then(|_| {
-                if temporary_dir.path().exists() {
-                    temporary_dir
-                        .close()
-                        .map_err(|e| JdkManagerError::io("Failed to cleanup temp dir", e))
-                } else {
-                    Ok(())
-                }
-            })?;
-        Ok(())
-    }
-
-    fn finish_extract(
+    pub fn get_full_version_from_path(
         &self,
         path: &Path,
-        response: attohttpc::Response,
-        url: String,
-        temporary_dir: &TempDir,
-    ) -> JdkManagerResult<()> {
-        if url.ends_with(".tar.gz") {
-            let expected_size = response.headers().get("Content-length").and_then(|len| {
-                len.to_str()
-                    .ok()
-                    .and_then(|len_str| len_str.parse::<u64>().ok())
-            });
-            self.unarchive_tar_gz(temporary_dir.path(), expected_size, response)
-        } else {
-            return Err(JdkManagerError::generic(format!(
-                "Don't know how to handle {}",
-                url
-            )));
+    ) -> ESResult<Option<JavaVersion>, JdkManagerError> {
+        let marker = path.join(JDK_VALID_MARKER_FILE_NAME);
+        if !marker.exists() {
+            return Ok(None);
         }
-        eprintln!();
-        let dir_entries = temporary_dir
-            .path()
-            .read_dir()
-            .map_err(|e| JdkManagerError::io("Failed to read temp dir", e))?
-            .map(|res| res.map(|e| e.path()))
+        let version = std::fs::read_to_string(&marker)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| format!("Could not read JDK version from {:?}", marker))?;
+        let version = JavaVersion::from_str(&version)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!("Could not parse JDK version from {:?}", marker)
+            })?;
+        Ok(Some(version))
+    }
+
+    pub fn get_jdk_path(
+        &self,
+        config: &JpreConfig,
+        jdk: &VersionKey,
+    ) -> ESResult<PathBuf, JdkManagerError> {
+        if !self.get_installed_jdks()?.into_iter().any(|k| &k == jdk) {
+            self.download_jdk(config, jdk)?;
+        }
+        Ok(jdk_path(jdk))
+    }
+
+    /// Download a JDK, overwriting any existing JDK with the same version.
+    pub fn download_jdk(
+        &self,
+        config: &JpreConfig,
+        jdk: &VersionKey,
+    ) -> ESResult<(), JdkManagerError> {
+        let path = jdk_path(jdk);
+        if path.exists() {
+            std::fs::remove_dir_all(&path)
+                .change_context(JdkManagerError)
+                .attach_printable_lazy(|| {
+                    format!("Could not remove JDK install folder at {:?}", path)
+                })?;
+        }
+        std::fs::create_dir_all(&path)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!("Could not create directory for JDK at {:?}", path)
+            })?;
+        let (list_info, info) = FOOJAY_API
+            .get_latest_package_info(config, jdk)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!("Could not get latest JDK package info for {}", jdk)
+            })?;
+
+        let response = self
+            .client
+            .get(info.direct_download_uri.as_str())
+            .call()
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!(
+                    "Could not download JDK package from {}",
+                    info.direct_download_uri
+                )
+            })?;
+        std::fs::create_dir_all(&*JDK_DOWNLOADS_PATH)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!(
+                    "Could not create JDK downloads directory at {:?}",
+                    JDK_DOWNLOADS_PATH
+                )
+            })?;
+        let download_path = tempfile::NamedTempFile::new_in(&*JDK_DOWNLOADS_PATH)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!(
+                    "Could not create temporary file for JDK download in {:?}",
+                    path
+                )
+            })?
+            .into_temp_path();
+        if let Err(e) = Self::download_jdk_to_file(&list_info, &info, response, &download_path) {
+            let path = download_path.to_owned();
+            if let Err(delete_err) = download_path.close() {
+                warn!(
+                    "Could not delete potentially invalid download at {:?}: {}",
+                    path, delete_err
+                );
+            }
+            return Err(e);
+        }
+        let unpack_dir = tempfile::tempdir_in(&*JDK_STORE_PATH)
+            .change_context(JdkManagerError)
+            .attach_printable("Could not create temporary directory for JDK unpacking")?;
+        if let Err(e) = Self::unpack_jdk(&list_info, &download_path, unpack_dir.path()) {
+            Self::cleanup_unpack_dir(unpack_dir);
+            return Err(e);
+        }
+        let root = match Self::determine_jdk_root(unpack_dir.path())
+            .change_context(JdkManagerError)
+            .attach_printable("Could not determine JDK root directory")
+        {
+            Ok(root) => root,
+            Err(e) => {
+                Self::cleanup_unpack_dir(unpack_dir);
+                return Err(e);
+            }
+        };
+
+        if let Err(e) = std::fs::rename(&root, &path)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| format!("Could not move JDK from {:?} to {:?}", root, path))
+        {
+            Self::cleanup_unpack_dir(unpack_dir);
+            return Err(e);
+        }
+        Self::cleanup_unpack_dir(unpack_dir);
+
+        let marker_temp = tempfile::NamedTempFile::new_in(&path)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!(
+                    "Could not create temporary file for JDK marker in {:?}",
+                    path
+                )
+            })?;
+        std::fs::write(marker_temp.path(), list_info.java_version.to_string())
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!("Could not write JDK version to {:?}", marker_temp.path())
+            })?;
+        let marker_path = path.join(JDK_VALID_MARKER_FILE_NAME);
+        std::fs::rename(marker_temp.path(), &marker_path)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!(
+                    "Could not move JDK marker from {:?} to {:?}",
+                    marker_temp.path(),
+                    marker_path
+                )
+            })?;
+
+        Ok(())
+    }
+
+    fn cleanup_unpack_dir(unpack_dir: TempDir) {
+        let path = unpack_dir.path().to_owned();
+        if let Err(delete_err) = unpack_dir.close() {
+            warn!(
+                "Could not delete invalid download dir at {:?}: {}",
+                path, delete_err
+            );
+        }
+    }
+
+    fn download_jdk_to_file(
+        list_info: &FoojayPackageListInfo,
+        info: &FoojayPackageInfo,
+        response: Response,
+        download_path: &Path,
+    ) -> ESResult<(), JdkManagerError> {
+        let mut file = std::fs::File::create(download_path)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!(
+                    "Could not create file for JDK download at {:?}",
+                    download_path
+                )
+            })?;
+        let mut checksum_verifier = ChecksumVerifier::new(
+            &info.checksum,
+            match info.checksum_type {
+                ChecksumType::Sha256 => Box::new(sha2::Sha256::new()),
+            },
+            &mut file,
+        );
+        let progress_bar = new_progress_bar(
+            response
+                .header("Content-Length")
+                .and_then(|s| s.parse().ok()),
+        )
+        .with_message(
+            format!("Downloading JDK {}", list_info.java_version)
+                .if_supports_color(Stream::Stderr, |s| s.green())
+                .to_string(),
+        );
+        std::io::copy(
+            &mut response.into_reader(),
+            &mut progress_bar.wrap_write(&mut checksum_verifier),
+        )
+        .change_context(JdkManagerError)
+        .attach_printable_lazy(|| format!("Could not write JDK package to {:?}", download_path))?;
+        if !checksum_verifier.verify() {
+            return Err(Report::new(JdkManagerError)
+                .attach_printable(format!("Checksum failed for {}", info.direct_download_uri)));
+        }
+        progress_bar.abandon_with_message(
+            format!("Downloaded JDK {} archive", list_info.java_version)
+                .if_supports_color(Stream::Stderr, |s| s.green())
+                .to_string(),
+        );
+        Ok(())
+    }
+
+    fn unpack_jdk(
+        list_info: &FoojayPackageListInfo,
+        download_path: &Path,
+        unpack_dir: &Path,
+    ) -> ESResult<(), JdkManagerError> {
+        let all_bars = MultiProgress::new();
+        let archive_size = std::fs::metadata(download_path)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!(
+                    "Could not get metadata for JDK download at {:?}",
+                    download_path
+                )
+            })?
+            .len();
+        let archive_bar = all_bars.add(new_progress_bar(Some(archive_size)));
+        let writing_bar = all_bars.add(new_progress_bar(None));
+        match list_info.archive_type {
+            ArchiveType::TarGz => {
+                let gz_decode = flate2::read::GzDecoder::new(
+                    archive_bar.wrap_read(
+                        std::fs::File::open(download_path)
+                            .change_context(JdkManagerError)
+                            .attach_printable_lazy(|| {
+                                format!("Could not open JDK download at {:?}", download_path)
+                            })?,
+                    ),
+                );
+                let mut archive = tar::Archive::new(writing_bar.wrap_read(gz_decode));
+                archive.set_preserve_permissions(true);
+                archive.set_overwrite(true);
+                for entry in archive.entries().unwrap() {
+                    let mut file = entry.unwrap();
+                    let archive_path = file.path().unwrap().into_owned();
+                    writing_bar.set_message(
+                        format!(
+                            "Extracting {}",
+                            archive_path
+                                .display()
+                                .if_supports_color(Stream::Stderr, |s| s.cyan())
+                        )
+                        .if_supports_color(Stream::Stderr, |s| s.green())
+                        .to_string(),
+                    );
+                    if !file.unpack_in(unpack_dir).unwrap() {
+                        warn!("Not extracting file with unsafe path: {:?}", archive_path);
+                    }
+                }
+            }
+            ArchiveType::Zip => {
+                let mut archive = zip::ZipArchive::new(
+                    archive_bar.wrap_read(
+                        std::fs::File::open(download_path)
+                            .change_context(JdkManagerError)
+                            .attach_printable_lazy(|| {
+                                format!("Could not open JDK download at {:?}", download_path)
+                            })?,
+                    ),
+                )
+                .change_context(JdkManagerError)
+                .attach_printable_lazy(|| {
+                    format!(
+                        "Could not read JDK download as ZIP archive at {:?}",
+                        download_path
+                    )
+                })?;
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i).unwrap();
+                    let Some(archive_path) = file.enclosed_name() else {
+                        warn!("Not extracting file with unsafe path: {:?}", file.name());
+                        continue;
+                    };
+                    writing_bar.set_message(
+                        format!(
+                            "Extracting {}",
+                            file.name().if_supports_color(Stream::Stderr, |s| s.cyan())
+                        )
+                        .if_supports_color(Stream::Stderr, |s| s.green())
+                        .to_string(),
+                    );
+                    let mut extracted_file = std::fs::File::create(unpack_dir.join(&archive_path))
+                        .change_context(JdkManagerError)
+                        .attach_printable_lazy(|| {
+                            format!(
+                                "Could not create file for extracted JDK at {:?}",
+                                unpack_dir.join(&archive_path)
+                            )
+                        })?;
+                    std::io::copy(&mut file, &mut extracted_file)
+                        .change_context(JdkManagerError)
+                        .attach_printable_lazy(|| {
+                            format!(
+                                "Could not write extracted JDK file to {:?}",
+                                unpack_dir.join(archive_path)
+                            )
+                        })?;
+                }
+            }
+        }
+        archive_bar.finish();
+        writing_bar.abandon_with_message(
+            "Done extracting!"
+                .if_supports_color(Stream::Stderr, |s| s.green())
+                .to_string(),
+        );
+        Ok(())
+    }
+
+    fn determine_jdk_root(unpack_dir: &Path) -> ESResult<PathBuf, JdkManagerError> {
+        let entries = std::fs::read_dir(unpack_dir)
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!("Could not read JDK unpack directory at {:?}", unpack_dir)
+            })?
+            .map(|r| r.map(|e| e.path()))
             .filter(|r| match r {
                 Ok(p) => match p.file_name() {
                     Some(name) => !name.to_string_lossy().starts_with('.'),
@@ -412,59 +415,33 @@ impl<A: JdkFetchApi> JdkManager<A> {
                 },
                 _ => true,
             })
-            .collect::<Result<Vec<_>, io::Error>>()
-            .map_err(|e| JdkManagerError::io("Failed to read temp dir entry", e))?;
-        let from_dir = if dir_entries.len() == 1 {
-            if std::env::consts::OS == "macos" {
-                let x = &dir_entries[0];
-                x.join("Contents/Home")
+            .collect::<Result<Vec<_>, std::io::Error>>()
+            .change_context(JdkManagerError)
+            .attach_printable_lazy(|| {
+                format!("Could not read JDK unpack directory at {:?}", unpack_dir)
+            })?;
+        let base_dir = if entries.len() == 1 {
+            entries[0].to_owned()
+        } else {
+            unpack_dir.to_owned()
+        };
+        let possible_home = if std::env::consts::OS == "macos" {
+            let contents_home = base_dir.join("Contents/Home");
+            if contents_home.exists() {
+                contents_home
             } else {
-                (&dir_entries[0]).to_path_buf()
+                base_dir
             }
         } else {
-            temporary_dir.path().to_path_buf()
+            base_dir
         };
-
-        std::fs::rename(from_dir, &path).map_err(|e| {
-            JdkManagerError::io(
-                format!("Unable to move to JDK folder ({})", path.display()),
-                e,
-            )
-        })?;
-
-        File::create(path.join(FINISHED_MARKER))
-            .map_err(|e| JdkManagerError::io("Unable to create marker", e))?;
-        Ok(())
-    }
-
-    fn unarchive_tar_gz(
-        &self,
-        path: &Path,
-        expected_size: Option<u64>,
-        reader: impl Read + Send + 'static,
-    ) {
-        let all_bars = MultiProgress::with_draw_target(ProgressDrawTarget::stderr());
-        let download_bar = all_bars.add(new_progress_bar(expected_size));
-        download_bar.set_message("Download progress");
-        let writing_bar = all_bars.add(new_progress_bar(None));
-
-        let static_path = path.to_path_buf();
-        let _ = std::thread::spawn(move || {
-            let gz_decode =
-                libflate::gzip::Decoder::new(BufReader::new(download_bar.wrap_read(reader)))
-                    .unwrap();
-            let mut archive = tar::Archive::new(BufReader::new(writing_bar.wrap_read(gz_decode)));
-            archive.set_preserve_permissions(true);
-            archive.set_overwrite(true);
-            for entry in archive.entries().unwrap() {
-                let mut file = entry.unwrap();
-                writing_bar.set_message(format!("Extracting {}", file.path().unwrap().display()));
-                file.unpack_in(&static_path).unwrap();
-            }
-            download_bar.finish();
-            writing_bar.abandon_with_message("Done extracting!");
-        });
-
-        all_bars.join().unwrap();
+        if possible_home.join("bin/java").exists() {
+            Ok(possible_home)
+        } else {
+            Err(Report::new(JdkManagerError).attach_printable(format!(
+                "Could not find JDK root directory in {:?}, tried {:?}",
+                unpack_dir, possible_home
+            )))
+        }
     }
 }
