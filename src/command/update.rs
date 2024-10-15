@@ -3,6 +3,7 @@ use crate::error::{ESResult, JpreError, UserMessage};
 use crate::foojay::FOOJAY_API;
 use crate::java_version::key::VersionKey;
 use crate::jdk_manager::JDK_MANAGER;
+use crate::tui::jdk_color;
 use clap::Args;
 use error_stack::{Report, ResultExt};
 use owo_colors::{OwoColorize, Stream};
@@ -69,7 +70,7 @@ impl JpreCommand for UpdateInstalled {
         for jdk in installed {
             eprintln!(
                 "Checking for updates for {}",
-                jdk.if_supports_color(Stream::Stderr, |s| s.bright_blue())
+                jdk.if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
             );
             let full_version = match JDK_MANAGER.get_full_version(&jdk) {
                 Ok(full_version) => full_version,
@@ -88,7 +89,7 @@ impl JpreCommand for UpdateInstalled {
                 if latest.compare(&full_version) == std::cmp::Ordering::Greater {
                     eprintln!(
                         "  New version available: {}",
-                        latest.if_supports_color(Stream::Stderr, |s| s.bright_blue())
+                        latest.if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
                     );
                     if !self.check {
                         Self::update_jdk(&context, &jdk)?;
@@ -96,7 +97,7 @@ impl JpreCommand for UpdateInstalled {
                 } else {
                     eprintln!(
                         "  Already up-to-date: {}",
-                        full_version.if_supports_color(Stream::Stderr, |s| s.bright_blue())
+                        full_version.if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
                     );
                 }
             } else {

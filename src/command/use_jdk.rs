@@ -2,8 +2,10 @@ use crate::command::{Context, JpreCommand};
 use crate::error::{ESResult, JpreError, UserMessage};
 use crate::java_home_management::set_context_path_to_java_home;
 use crate::java_version::key::VersionKey;
+use crate::tui::jdk_color;
 use clap::Args;
 use error_stack::Report;
+use owo_colors::{OwoColorize, Stream};
 use std::str::FromStr;
 
 /// Use a JDK in the current context.
@@ -46,7 +48,10 @@ impl JpreCommand for UseJdk {
         };
         set_context_path_to_java_home(&context, &jdk)?;
 
-        eprintln!("Using JDK {}", jdk);
+        eprintln!(
+            "Using JDK {}",
+            jdk.if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
+        );
         Ok(())
     }
 }

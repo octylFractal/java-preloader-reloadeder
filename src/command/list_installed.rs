@@ -1,6 +1,7 @@
 use crate::command::{Context, JpreCommand};
 use crate::error::{ESResult, JpreError};
 use crate::jdk_manager::JDK_MANAGER;
+use crate::tui::jdk_color;
 use clap::Args;
 use error_stack::ResultExt;
 use owo_colors::{OwoColorize, Stream};
@@ -26,10 +27,10 @@ impl JpreCommand for ListInstalled {
                 .attach_printable_lazy(|| format!("Failed to get full version for JDK {}", jdk))?;
             println!(
                 "- {} (full: {})",
-                jdk.if_supports_color(Stream::Stdout, |s| s.bright_blue()),
+                jdk.if_supports_color(Stream::Stdout, |s| s.color(jdk_color())),
                 full.map(|f| f.to_string())
                     .unwrap_or_else(|| "<unknown>".to_string())
-                    .if_supports_color(Stream::Stdout, |s| s.bright_blue())
+                    .if_supports_color(Stream::Stdout, |s| s.color(jdk_color()))
             );
         }
 

@@ -33,8 +33,8 @@ mod http_client;
 mod java_home_management;
 mod java_version;
 mod jdk_manager;
-mod progress;
 mod string;
+mod tui;
 
 /// java-preloader-reloadeder. A tool to manage Java installations.
 #[derive(Debug, Parser)]

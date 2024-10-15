@@ -9,9 +9,11 @@ pub struct ChecksumVerifier<T, W> {
 
 impl<T: DynDigest, W: Write> ChecksumVerifier<T, W> {
     pub fn new(checksum: &str, checksummer: Box<T>, delegate: W) -> Self {
-        let checksum = hex::decode(checksum).unwrap_or_else(|_| {
-            panic!("Failed to decode checksum: {}", checksum);
-        }).into_boxed_slice();
+        let checksum = hex::decode(checksum)
+            .unwrap_or_else(|_| {
+                panic!("Failed to decode checksum: {}", checksum);
+            })
+            .into_boxed_slice();
         if checksum.len() != checksummer.output_size() {
             panic!(
                 "Checksum has incorrect length: expected {}, got {}",

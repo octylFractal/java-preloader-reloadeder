@@ -1,54 +1,54 @@
 use crate::command::{Context, JpreCommand};
-use crate::error::{ESResult, JpreError, UserMessage};
-use crate::foojay::FOOJAY_API;
+use crate::error::{ESResult, JpreError};
+use crate::java_version::key::VersionKey;
+use crate::jdk_manager::JDK_MANAGER;
+use crate::tui::jdk_color;
 use clap::Args;
-use error_stack::{Report, ResultExt};
-use itertools::Itertools;
-use std::collections::HashSet;
+use error_stack::ResultExt;
+use owo_colors::{OwoColorize, Stream};
 
 /// Set the default JDK to use.
 #[derive(Debug, Args)]
 pub struct SetDefault {
-    /// The distribution to use.
-    #[clap(name = "distribution")]
-    distribution: String,
+    /// The JDK to use.
+    jdk: VersionKey,
 }
 
 impl JpreCommand for SetDefault {
     fn run(self, mut context: Context) -> ESResult<(), JpreError> {
-        if self.distribution == context.config.distribution {
-            eprintln!("Distribution already set to '{}'", self.distribution);
+        if context
+            .config
+            .default_jdk
+            .as_ref()
+            .is_some_and(|i| i == &self.jdk)
+        {
+            eprintln!(
+                "Default JDK already set to '{}'",
+                self.jdk
+                    .if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
+            );
             return Ok(());
         }
-        eprintln!("Validating distribution '{}'...", self.distribution);
-        let mut distributions = FOOJAY_API
-            .list_distributions()
+        eprintln!(
+            "Validating JDK '{}'...",
+            self.jdk
+                .if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
+        );
+        JDK_MANAGER
+            .get_jdk_path(&context.config, &self.jdk)
             .change_context(JpreError::Unexpected)
-            .attach_printable("Failed to list distributions")?;
-        let all_names = distributions
-            .iter()
-            .flat_map(|i| &i.synonyms)
-            .collect::<HashSet<_>>();
-        if !all_names.contains(&self.distribution) {
-            distributions.sort();
-            return Err(Report::new(JpreError::UserError)
-                .attach(UserMessage {
-                    message: format!("Distribution '{}' not found", context.config.distribution),
-                })
-                .attach(UserMessage {
-                    message: format!(
-                        "Available distributions: {}",
-                        distributions.into_iter().map(|i| i.name).join(", ")
-                    ),
-                }));
-        }
-        context.config.distribution = self.distribution.clone();
+            .attach_printable_lazy(|| format!("Failed to get path for JDK {}", self.jdk))?;
+        context.config.default_jdk = Some(self.jdk.clone());
         context
             .config
             .save()
             .change_context(JpreError::Unexpected)
             .attach_printable("Failed to save config")?;
-        eprintln!("Distribution set to '{}'", self.distribution);
+        eprintln!(
+            "Default JDK set to '{}'",
+            self.jdk
+                .if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
+        );
         Ok(())
     }
 }

@@ -26,7 +26,7 @@ pub struct JpreConfig {
     /// used if it can be mapped.
     #[serde(default)]
     pub forced_architecture: Option<String>,
-    /// OS to force when downloading a JDK. If not set, the system's OS will be used if it can be 
+    /// OS to force when downloading a JDK. If not set, the system's OS will be used if it can be
     /// mapped.
     #[serde(default)]
     pub forced_os: Option<String>,

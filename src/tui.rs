@@ -1,5 +1,6 @@
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
+use owo_colors::{AnsiColors, DynColor};
 
 pub fn new_progress_bar(bar_length: Option<u64>) -> ProgressBar {
     let bar_style = match bar_length {
@@ -11,10 +12,14 @@ pub fn new_progress_bar(bar_length: Option<u64>) -> ProgressBar {
             .progress_chars("#|-"),
         None => ProgressStyle::default_spinner()
             .template(
-                &*format!("{}{}{}", "    [", style("-".repeat(60)).for_stderr().blue(), "] {bytes:>8} {bytes_per_sec} {wide_msg}")
+                &format!("{}{}{}", "    [", style("-".repeat(60)).for_stderr().blue(), "] {bytes:>8} {bytes_per_sec} {wide_msg}")
             )
             .unwrap(),
     };
 
     ProgressBar::new(bar_length.unwrap_or(!0)).with_style(bar_style)
+}
+
+pub fn jdk_color() -> impl DynColor {
+    AnsiColors::BrightBlue
 }

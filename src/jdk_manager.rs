@@ -6,7 +6,8 @@ use crate::foojay::{
 };
 use crate::http_client::new_http_client;
 use crate::java_version::key::VersionKey;
-use crate::progress::new_progress_bar;
+use crate::java_version::JavaVersion;
+use crate::tui::new_progress_bar;
 use derive_more::Display;
 use digest::Digest;
 use error_stack::{Context, Report, ResultExt};
@@ -18,7 +19,6 @@ use std::sync::LazyLock;
 use tempfile::TempDir;
 use tracing::warn;
 use ureq::Response;
-use crate::java_version::JavaVersion;
 
 #[derive(Debug, Display)]
 pub struct JdkManagerError;
@@ -82,7 +82,10 @@ impl JdkManager {
         Ok(result)
     }
 
-    pub fn get_full_version(&self, jdk: &VersionKey) -> ESResult<Option<JavaVersion>, JdkManagerError> {
+    pub fn get_full_version(
+        &self,
+        jdk: &VersionKey,
+    ) -> ESResult<Option<JavaVersion>, JdkManagerError> {
         self.get_full_version_from_path(&jdk_path(jdk))
     }
 
@@ -99,9 +102,7 @@ impl JdkManager {
             .attach_printable_lazy(|| format!("Could not read JDK version from {:?}", marker))?;
         let version = JavaVersion::from_str(&version)
             .change_context(JdkManagerError)
-            .attach_printable_lazy(|| {
-                format!("Could not parse JDK version from {:?}", marker)
-            })?;
+            .attach_printable_lazy(|| format!("Could not parse JDK version from {:?}", marker))?;
         Ok(Some(version))
     }
 

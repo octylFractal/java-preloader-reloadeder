@@ -1,5 +1,6 @@
 use crate::config::JpreConfig;
 use crate::error::ESResult;
+use crate::http_client::new_http_client;
 use crate::java_version::key::VersionKey;
 use crate::java_version::{JavaVersion, PreRelease};
 use derive_more::Display;
@@ -9,7 +10,6 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 use url::Url;
-use crate::http_client::new_http_client;
 
 const FOOJAY_BASE_URL: &str = "https://api.foojay.io/disco/v3.0";
 
@@ -135,7 +135,8 @@ impl FoojayDiscoApi {
             ],
         )
         .unwrap();
-        let list_info = self.call_foojay_api::<FoojayPackageListInfo>(url)?
+        let list_info = self
+            .call_foojay_api::<FoojayPackageListInfo>(url)?
             .into_iter()
             .find(|p| p.latest_build_available)
             .ok_or_else(|| {

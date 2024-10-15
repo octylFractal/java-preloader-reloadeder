@@ -2,8 +2,10 @@ use crate::command::{Context, JpreCommand};
 use crate::error::{ESResult, JpreError};
 use crate::java_version::key::VersionKey;
 use crate::jdk_manager::JDK_MANAGER;
+use crate::tui::jdk_color;
 use clap::Args;
 use error_stack::ResultExt;
+use owo_colors::{OwoColorize, Stream};
 
 /// Remove an installed JDK.
 #[derive(Debug, Args)]
@@ -21,7 +23,11 @@ impl JpreCommand for RemoveJdk {
         std::fs::remove_dir_all(&path)
             .change_context(JpreError::Unexpected)
             .attach_printable_lazy(|| format!("Failed to remove JDK at {}", path.display()))?;
-        eprintln!("Removed JDK {}", self.jdk);
+        eprintln!(
+            "Removed JDK {}",
+            self.jdk
+                .if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
+        );
         Ok(())
     }
 }

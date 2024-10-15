@@ -6,6 +6,18 @@ use crate::jdk_manager::JDK_MANAGER;
 use error_stack::ResultExt;
 use tracing::debug;
 
+pub fn clear_context_path() -> ESResult<(), JpreError> {
+    let path = get_context_path();
+    debug!("Removing Java home path file '{:?}'", path);
+    match std::fs::remove_file(&path) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e)
+            .change_context(JpreError::Unexpected)
+            .attach_printable_lazy(|| format!("Failed to remove Java home path file '{:?}'", path)),
+    }
+}
+
 pub fn set_context_path_to_java_home(
     context: &Context,
     jdk: &VersionKey,
@@ -23,6 +35,7 @@ pub fn set_context_path_to_java_home(
         .attach_printable_lazy(|| {
             format!("Failed to create directories to {}", parent.display())
         })?;
+    clear_context_path()?;
     debug!(
         "Creating symlink from '{}' to '{}'",
         jdk.display(),
