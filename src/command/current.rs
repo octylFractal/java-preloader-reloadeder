@@ -12,6 +12,10 @@ pub struct Current {}
 impl JpreCommand for Current {
     fn run(self, _context: Context) -> ESResult<(), JpreError> {
         let path = get_context_path();
+        if !path.exists() {
+            println!("<unknown>");
+            return Ok(());
+        }
         let link_target = std::fs::read_link(&path)
             .change_context(JpreError::Unexpected)
             .attach_printable_lazy(|| format!("Failed to read link target of {:?}", path))?;
