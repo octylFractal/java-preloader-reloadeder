@@ -53,6 +53,9 @@ impl JdkManager {
     }
 
     pub fn get_installed_jdks(&self) -> ESResult<Vec<VersionKey>, JdkManagerError> {
+        if !JDK_STORE_PATH.exists() {
+            return Ok(Vec::new());
+        }
         let mut result = Vec::new();
         for ent in std::fs::read_dir(&*JDK_STORE_PATH)
             .change_context(JdkManagerError)
@@ -137,7 +140,7 @@ impl JdkManager {
                 format!("Could not create directory for JDK at {:?}", path)
             })?;
         let (list_info, info) = FOOJAY_API
-            .get_latest_package_info(config, jdk)
+            .get_latest_package_info_using_priority(config, jdk)
             .change_context(JdkManagerError)
             .attach_printable_lazy(|| {
                 format!("Could not get latest JDK package info for {}", jdk)
@@ -263,6 +266,12 @@ impl JdkManager {
             &info.checksum,
             match info.checksum_type {
                 ChecksumType::Sha256 => Box::new(sha2::Sha256::new()),
+                ChecksumType::Unknown(ref ct) => {
+                    unreachable!(
+                        "JDKs listed should not contain unknown checksum type {}",
+                        ct
+                    )
+                }
             },
             &mut file,
         );
@@ -391,6 +400,9 @@ impl JdkManager {
                             )
                         })?;
                 }
+            }
+            ArchiveType::Unknown(ref at) => {
+                unreachable!("JDKs listed should not contain unknown archive type {}", at)
             }
         }
         archive_bar.finish();

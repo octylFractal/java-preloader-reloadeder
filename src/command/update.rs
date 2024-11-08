@@ -82,7 +82,7 @@ impl JpreCommand for UpdateInstalled {
 
             if let Some(full_version) = full_version {
                 let (list_info, _) = FOOJAY_API
-                    .get_latest_package_info(&context.config, &jdk)
+                    .get_latest_package_info_using_priority(&context.config, &jdk)
                     .change_context(JpreError::Unexpected)
                     .attach_printable("Failed to get latest package info")?;
                 let latest = list_info.java_version;
@@ -116,7 +116,7 @@ impl JpreCommand for UpdateInstalled {
 impl UpdateInstalled {
     fn update_jdk(context: &Context, jdk: &VersionKey) -> Result<(), Report<JpreError>> {
         JDK_MANAGER
-            .download_jdk(&context.config, &jdk)
+            .download_jdk(&context.config, jdk)
             .change_context(JpreError::Unexpected)
             .attach_printable("Failed to update JDK")?;
         Ok(())

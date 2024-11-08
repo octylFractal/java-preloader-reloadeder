@@ -9,7 +9,7 @@ use clap::Args;
 #[derive(Debug, Args)]
 pub struct ListVersions {
     /// The distribution to list versions for.
-    /// Defaults to the current distribution.
+    /// Defaults to the current primary distribution.
     #[clap()]
     distribution: Option<String>,
     /// Show pre-release versions.
@@ -25,7 +25,7 @@ impl JpreCommand for ListVersions {
         let distribution = self
             .distribution
             .as_ref()
-            .unwrap_or(&context.config.distribution);
+            .unwrap_or_else(|| context.config.distributions.first().unwrap());
         eprintln!("Listing versions for distribution '{}'...", distribution);
         let result = FOOJAY_API.list_dist_version_keys(distribution);
         let mut major_versions = match result {

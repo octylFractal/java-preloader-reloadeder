@@ -7,7 +7,7 @@ use crate::command::list_installed::ListInstalled;
 use crate::command::list_versions::ListVersions;
 use crate::command::remove_jdk::RemoveJdk;
 use crate::command::set_default::SetDefault;
-use crate::command::set_distribution::SetDistribution;
+use crate::command::set_distributions::SetDistributions;
 use crate::command::update::UpdateInstalled;
 use crate::command::use_jdk::UseJdk;
 use crate::command::{Context, JpreCommand};
@@ -52,7 +52,7 @@ enum JpreCommandEnum {
     ListDistributions(ListDistributions),
     ListVersions(ListVersions),
     ListInstalled(ListInstalled),
-    SetDistribution(SetDistribution),
+    SetDistributions(SetDistributions),
     Default(SetDefault),
     Debug(Debug),
     Use(UseJdk),
@@ -96,12 +96,9 @@ fn main() {
 }
 
 fn main_with_result() -> ESResult<(), JpreError> {
-    let config = JpreConfig::load()?;
-    // re-save config to ensure it's up-to-date
-    config.save()?;
     let args = Jpre::parse();
 
-    let env_filt = tracing_subscriber::filter::EnvFilter::builder()
+    let mut env_filt = tracing_subscriber::filter::EnvFilter::builder()
         .with_default_directive(
             match args.verbose {
                 0 => tracing_subscriber::filter::LevelFilter::INFO,
@@ -112,8 +109,8 @@ fn main_with_result() -> ESResult<(), JpreError> {
         )
         .from_env_lossy()
         // Set some loud things to warn
-        .add_directive("reqwest=warn".parse().unwrap())
-        .add_directive("hyper=warn".parse().unwrap());
+        .add_directive("ureq=warn".parse().unwrap())
+        .add_directive("rustls=warn".parse().unwrap());
 
     fn install_with_event_format<E>(format: E, env_filt: tracing_subscriber::filter::EnvFilter)
     where
@@ -133,8 +130,13 @@ fn main_with_result() -> ESResult<(), JpreError> {
             env_filt,
         );
     } else {
+        env_filt = env_filt.add_directive("ureq::unit=debug".parse().unwrap());
         install_with_event_format(Format::default(), env_filt);
     }
+
+    let config = JpreConfig::load()?;
+    // re-save config to ensure it's up-to-date
+    config.save()?;
 
     let context = Context {
         config: config.clone(),

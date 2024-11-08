@@ -6,34 +6,47 @@ use error_stack::{Report, ResultExt};
 use itertools::Itertools;
 use std::collections::HashSet;
 
-/// Set the distribution to use.
+/// Set the distribution(s) to use.
 #[derive(Debug, Args)]
-pub struct SetDistribution {
-    /// The distribution to use.
-    #[clap(name = "distribution")]
-    distribution: String,
+pub struct SetDistributions {
+    /// The distribution(s) to use.
+    #[clap(required = true, num_args = 1..)]
+    distributions: Vec<String>,
 }
 
-impl JpreCommand for SetDistribution {
+impl JpreCommand for SetDistributions {
     fn run(self, mut context: Context) -> ESResult<(), JpreError> {
-        if self.distribution == context.config.distribution {
-            eprintln!("Distribution already set to '{}'", self.distribution);
+        if self.distributions == context.config.distributions {
+            eprintln!(
+                "Distribution(s) already set to '{}'",
+                self.distributions.join(", ")
+            );
             return Ok(());
         }
-        eprintln!("Validating distribution '{}'...", self.distribution);
-        let mut distributions = FOOJAY_API
+        eprintln!(
+            "Validating distribution(s) '{}'...",
+            self.distributions.join(", ")
+        );
+        let distributions = FOOJAY_API
             .list_distributions()
             .change_context(JpreError::Unexpected)
             .attach_printable("Failed to list distributions")?;
         let all_names = distributions
             .iter()
             .flat_map(|i| &i.synonyms)
+            .map(String::as_str)
             .collect::<HashSet<_>>();
-        if !all_names.contains(&self.distribution) {
-            distributions.sort();
+        let mut missing_names = self
+            .distributions
+            .iter()
+            .map(String::as_str)
+            .filter(|i| !all_names.contains(*i))
+            .collect::<Vec<_>>();
+        if !missing_names.is_empty() {
+            missing_names.sort();
             return Err(Report::new(JpreError::UserError)
                 .attach(UserMessage {
-                    message: format!("Distribution '{}' not found", context.config.distribution),
+                    message: format!("Distribution(s) '{}' not found", missing_names.join(", ")),
                 })
                 .attach(UserMessage {
                     message: format!(
@@ -42,13 +55,13 @@ impl JpreCommand for SetDistribution {
                     ),
                 }));
         }
-        context.config.distribution = self.distribution.clone();
+        context.config.distributions = self.distributions.clone();
         context
             .config
             .save()
             .change_context(JpreError::Unexpected)
             .attach_printable("Failed to save config")?;
-        eprintln!("Distribution set to '{}'", self.distribution);
+        eprintln!("Distribution(s) set to '{}'", self.distributions.join(", "));
         Ok(())
     }
 }

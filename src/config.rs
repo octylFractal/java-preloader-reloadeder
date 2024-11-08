@@ -1,4 +1,4 @@
-use crate::error::{ESResult, JpreError};
+use crate::error::{ESResult, JpreError, UserMessage};
 use crate::java_version::key::VersionKey;
 use crate::java_version::PreRelease;
 use directories::ProjectDirs;
@@ -6,6 +6,7 @@ use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use tracing::{debug, trace};
 
 pub static PROJECT_DIRS: LazyLock<ProjectDirs> = LazyLock::new(|| {
     ProjectDirs::from("net", "octyl", "jpre").expect("Could not determine project directories")
@@ -19,9 +20,12 @@ pub struct JpreConfig {
     /// The default JDK to use in a new context.
     #[serde(default)]
     pub default_jdk: Option<VersionKey>,
-    /// The distribution to use when downloading a JDK. Must be a valid Foojay distribution.
+    /// The legacy distribution option.
+    #[serde(default)]
+    distribution: Option<String>,
+    /// The distribution(s) to use when downloading a JDK. Must be a valid Foojay distribution.
     #[serde(default = "default_distribution")]
-    pub distribution: String,
+    pub distributions: Vec<String>,
     /// Architecture to force when downloading a JDK. If not set, the system's architecture will be
     /// used if it can be mapped.
     #[serde(default)]
@@ -32,15 +36,9 @@ pub struct JpreConfig {
     pub forced_os: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct Jpre02Config {
-    #[serde(default)]
-    pub default_jdk: Option<u32>,
-}
-
 impl JpreConfig {
     pub(super) fn load() -> ESResult<JpreConfig, JpreError> {
-        std::fs::create_dir_all(PROJECT_DIRS.config_dir())
+        std::fs::create_dir_all(CONFIG_PATH.parent().unwrap())
             .change_context(JpreError::Unexpected)
             .attach_printable_lazy(|| {
                 format!(
@@ -61,29 +59,56 @@ impl JpreConfig {
             .attach_printable_lazy(|| {
                 format!("Could not read config file at {:?}", *CONFIG_PATH)
             })?;
-        let config = toml::from_str(&contents);
+        let config = toml::from_str::<JpreConfig>(&contents);
         match config {
-            Ok(config) => Ok(config),
+            Ok(mut config) => {
+                if let Some(distribution) = config.distribution {
+                    config.distributions = vec![distribution];
+                    config.distribution = None;
+                }
+                if config.distributions.is_empty() {
+                    return Err(JpreError::UserError).attach(UserMessage {
+                        message: "No distributions set in config".to_string(),
+                    });
+                }
+                Ok(config)
+            }
             Err(e) => {
                 // Try to load the old config format.
-                let Ok(old_config) = toml::from_str::<Jpre02Config>(&contents) else {
+                let Ok(old_config) = toml::from_str::<toml::Table>(&contents) else {
                     return Err(e)
                         .change_context(JpreError::Unexpected)
                         .attach_printable_lazy(|| {
                             format!("Could not parse config file at {:?}", *CONFIG_PATH)
                         });
                 };
-                let new_config = JpreConfig {
-                    default_jdk: old_config.default_jdk.map(|v| VersionKey {
-                        major: v,
-                        pre_release: PreRelease::None,
-                    }),
-                    distribution: default_distribution(),
-                    forced_architecture: None,
-                    forced_os: None,
-                };
-                new_config.save()?;
-                Ok(new_config)
+                if let Some(toml::Value::Integer(major)) = old_config.get("default_jdk") {
+                    if old_config.keys().len() != 1 {
+                        return Err(e)
+                            .change_context(JpreError::Unexpected)
+                            .attach_printable_lazy(|| {
+                                format!("Could not parse config file at {:?}", *CONFIG_PATH)
+                            });
+                    }
+                    // jpre 0.2 config format
+                    let new_config = JpreConfig {
+                        default_jdk: Some(VersionKey {
+                            major: *major as u32,
+                            pre_release: PreRelease::None,
+                        }),
+                        distribution: None,
+                        distributions: default_distribution(),
+                        forced_architecture: None,
+                        forced_os: None,
+                    };
+                    new_config.save()?;
+                    return Ok(new_config);
+                }
+                Err(e)
+                    .change_context(JpreError::Unexpected)
+                    .attach_printable_lazy(|| {
+                        format!("Could not parse config file at {:?}", *CONFIG_PATH)
+                    })
             }
         }
     }
@@ -92,6 +117,8 @@ impl JpreConfig {
         let contents = toml::to_string(self)
             .change_context(JpreError::Unexpected)
             .attach_printable("Could not serialize config to TOML")?;
+        debug!("Writing config to {:?}", *CONFIG_PATH);
+        trace!("Config: {}", contents);
         std::fs::write(&*CONFIG_PATH, contents)
             .change_context(JpreError::Unexpected)
             .attach_printable_lazy(|| {
@@ -101,6 +128,6 @@ impl JpreConfig {
     }
 }
 
-fn default_distribution() -> String {
-    "temurin".to_string()
+fn default_distribution() -> Vec<String> {
+    vec!["temurin".to_string()]
 }

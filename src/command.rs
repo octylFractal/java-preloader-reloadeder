@@ -11,7 +11,7 @@ pub(super) mod list_installed;
 pub(super) mod list_versions;
 pub(super) mod remove_jdk;
 pub(super) mod set_default;
-pub(super) mod set_distribution;
+pub(super) mod set_distributions;
 pub(super) mod update;
 pub(super) mod use_jdk;
 
