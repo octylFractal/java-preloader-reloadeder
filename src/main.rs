@@ -64,11 +64,6 @@ enum JpreCommandEnum {
 }
 
 fn main() {
-    if !sysinfo::IS_SUPPORTED_SYSTEM {
-        error!("Unsupported system: {}", std::env::consts::OS);
-        std::process::exit(1);
-    }
-
     match main_with_result() {
         Ok(()) => (),
         Err(e) if matches!(e.current_context(), JpreError::UserError) => {

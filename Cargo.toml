@@ -12,30 +12,28 @@ edition = "2021"
 
 [dependencies]
 error-stack = "0.5.0"
-serde_json = "1.0.128"
 digest = "0.10.7"
 sha2 = "0.10.8"
-sysinfo = "0.32.0"
 directories = "5.0.1"
-tracing = "0.1.40"
+tracing = "0.1.41"
 toml = "0.8.19"
-itertools = "0.13.0"
-thiserror = "1.0.64"
-console = "0.15.8"
-indicatif = "0.17.8"
+itertools = "0.14.0"
+thiserror = "2.0.9"
+console = "0.15.10"
+indicatif = "0.17.9"
 hex = "0.4.3"
-tempfile = "3.13.0"
-tar = "0.4.42"
-flate2 = "1.0.34"
-zip = "2.2.0"
+tempfile = "3.15.0"
+tar = "0.4.43"
+flate2 = "1.0.35"
+zip = "2.2.2"
 enum_dispatch = "0.3.13"
 
 [dependencies.url]
-version = "2.5.2"
+version = "2.5.4"
 features = ["serde"]
 
 [dependencies.ureq]
-version = "2.10.1"
+version = "2.12.1"
 features = ["json", "proxy-from-env"]
 
 [dependencies.owo-colors]
@@ -47,15 +45,15 @@ version = "1.0.0"
 features = ["full"]
 
 [dependencies.clap]
-version = "4.5.20"
+version = "4.5.23"
 features = ["derive"]
 
 [dependencies.serde]
-version = "1.0.210"
+version = "1.0.217"
 features = ["derive"]
 
 [dependencies.tracing-subscriber]
-version = "0.3.18"
+version = "0.3.19"
 features = ["env-filter"]
 
 # Optimize dependencies in dev
