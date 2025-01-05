@@ -75,16 +75,23 @@ impl JpreCommand for UpdateInstalled {
             let full_version = match JDK_MANAGER.get_full_version(&jdk) {
                 Ok(full_version) => full_version,
                 Err(err) => {
-                    warn!("Failed to get full version for {}: {}", jdk, err);
+                    warn!("Failed to get full version for {}: {:?}", jdk, err);
                     continue;
                 }
             };
 
             if let Some(full_version) = full_version {
-                let (list_info, _) = FOOJAY_API
+                let latest_info_result = FOOJAY_API
                     .get_latest_package_info_using_priority(&context.config, &jdk)
                     .change_context(JpreError::Unexpected)
-                    .attach_printable("Failed to get latest package info")?;
+                    .attach_printable("Failed to get latest package info");
+                let (list_info, _) = match latest_info_result {
+                    Ok(info) => info,
+                    Err(err) => {
+                        warn!("Failed to get latest package info for {}: {:?}", jdk, err);
+                        continue;
+                    }
+                };
                 let latest = list_info.java_version;
                 if latest.compare(&full_version) == std::cmp::Ordering::Greater {
                     eprintln!(
