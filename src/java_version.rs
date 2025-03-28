@@ -7,6 +7,7 @@ use derive_more::Display;
 use error_stack::{Context, Report, ResultExt};
 use serde::Deserialize;
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::str::{FromStr, Split};
 
 #[derive(Debug, Display)]

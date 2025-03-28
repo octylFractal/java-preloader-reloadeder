@@ -208,19 +208,21 @@ impl FoojayDiscoApi {
             .change_context(FoojayDiscoApiError::Api)?;
         let status_code = response.status();
         let data: FoojayResult<T> = response
-            .into_json()
+            .into_body()
+            .read_json()
             .change_context(FoojayDiscoApiError::Api)?;
 
-        match status_code {
-            200..=299 => Ok(data.result),
-            _ => match data.message.as_str() {
+        if status_code.is_success() {
+            Ok(data.result)
+        } else {
+            match data.message.as_str() {
                 "Requested distribution not found" => {
                     Err(Report::new(FoojayDiscoApiError::InvalidDistribution))
                 }
                 _ => Err(Report::new(FoojayDiscoApiError::Api)
                     .attach_printable(format!("Unknown message: {}", data.message)))
                 .attach_printable(format!("Status code: {}", status_code)),
-            },
+            }
         }
     }
 
@@ -241,10 +243,10 @@ fn try_fill_checksum(info: &mut FoojayPackageInfo) {
         let Ok(response) = ureq::get(&url).call() else {
             continue;
         };
-        if !matches!(response.status(), 200..=299) {
+        if !response.status().is_success() {
             continue;
         }
-        let Ok(checksum) = response.into_string() else {
+        let Ok(checksum) = response.into_body().read_to_string() else {
             continue;
         };
         let checksum = checksum.trim();

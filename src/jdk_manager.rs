@@ -18,7 +18,8 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 use tempfile::TempDir;
 use tracing::warn;
-use ureq::Response;
+use ureq::http::Response;
+use ureq::Body;
 
 #[derive(Debug, Display)]
 pub struct JdkManagerError;
@@ -251,7 +252,7 @@ impl JdkManager {
     fn download_jdk_to_file(
         list_info: &FoojayPackageListInfo,
         info: &FoojayPackageInfo,
-        response: Response,
+        response: Response<Body>,
         download_path: &Path,
     ) -> ESResult<(), JdkManagerError> {
         let mut file = std::fs::File::create(download_path)
@@ -276,9 +277,7 @@ impl JdkManager {
             &mut file,
         );
         let progress_bar = new_progress_bar(
-            response
-                .header("Content-Length")
-                .and_then(|s| s.parse().ok()),
+            response.body().content_length(),
         )
         .with_message(
             format!("Downloading JDK {}", list_info.java_version)
@@ -286,7 +285,7 @@ impl JdkManager {
                 .to_string(),
         );
         std::io::copy(
-            &mut response.into_reader(),
+            &mut response.into_body().into_reader(),
             &mut progress_bar.wrap_write(&mut checksum_verifier),
         )
         .change_context(JdkManagerError)

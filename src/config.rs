@@ -5,8 +5,9 @@ use directories::ProjectDirs;
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::LazyLock;
-use tracing::{debug, trace};
+use toml::de::Error;
 
 pub static PROJECT_DIRS: LazyLock<ProjectDirs> = LazyLock::new(|| {
     ProjectDirs::from("net", "octyl", "jpre").expect("Could not determine project directories")
@@ -54,12 +55,7 @@ impl JpreConfig {
             .attach_printable_lazy(|| {
                 format!("Could not open config file at {:?}", *CONFIG_PATH)
             })?;
-        let contents = std::fs::read_to_string(&*CONFIG_PATH)
-            .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| {
-                format!("Could not read config file at {:?}", *CONFIG_PATH)
-            })?;
-        let config = toml::from_str::<JpreConfig>(&contents);
+        let (contents, config) = Self::read_config()?;
         match config {
             Ok(mut config) => {
                 if let Some(distribution) = config.distribution {
@@ -90,19 +86,35 @@ impl JpreConfig {
                                 format!("Could not parse config file at {:?}", *CONFIG_PATH)
                             });
                     }
-                    // jpre 0.2 config format
-                    let new_config = JpreConfig {
-                        default_jdk: Some(VersionKey {
+
+                    let mut new_config = toml_edit::DocumentMut::new();
+                    new_config["default_jdk"] = toml_edit::value(
+                        VersionKey {
                             major: *major as u32,
                             pre_release: PreRelease::None,
-                        }),
-                        distribution: None,
-                        distributions: default_distribution(),
-                        forced_architecture: None,
-                        forced_os: None,
-                    };
-                    new_config.save()?;
-                    return Ok(new_config);
+                        }
+                        .to_string(),
+                    );
+                    let mut distributions = toml_edit::Array::new();
+                    distributions.push("temurin");
+                    new_config["distributions"] = toml_edit::value(distributions);
+
+                    // Ensure whatever is in the config is valid.
+                    toml::from_str::<JpreConfig>(&new_config.to_string())
+                        .expect("New config is invalid");
+
+                    std::fs::write(&*CONFIG_PATH, new_config.to_string())
+                        .change_context(JpreError::Unexpected)
+                        .attach_printable_lazy(|| {
+                            format!("Could not write config file at {:?}", *CONFIG_PATH)
+                        })?;
+
+                    return Self::read_config()?
+                        .1
+                        .change_context(JpreError::Unexpected)
+                        .attach_printable_lazy(|| {
+                            format!("Could not parse config file at {:?}", *CONFIG_PATH)
+                        });
                 }
                 Err(e)
                     .change_context(JpreError::Unexpected)
@@ -113,16 +125,36 @@ impl JpreConfig {
         }
     }
 
-    pub fn save(&self) -> ESResult<(), JpreError> {
-        let contents = toml::to_string(self)
-            .change_context(JpreError::Unexpected)
-            .attach_printable("Could not serialize config to TOML")?;
-        debug!("Writing config to {:?}", *CONFIG_PATH);
-        trace!("Config: {}", contents);
-        std::fs::write(&*CONFIG_PATH, contents)
+    fn read_config() -> ESResult<(String, Result<JpreConfig, Error>), JpreError> {
+        let contents = std::fs::read_to_string(&*CONFIG_PATH)
             .change_context(JpreError::Unexpected)
             .attach_printable_lazy(|| {
-                format!("Could not write config file to {:?}", *CONFIG_PATH)
+                format!("Could not read config file at {:?}", *CONFIG_PATH)
+            })?;
+        let config = toml::from_str::<JpreConfig>(&contents);
+        Ok((contents, config))
+    }
+
+    pub fn edit_config<F: FnOnce(&mut toml_edit::DocumentMut)>(
+        &mut self,
+        editor: F,
+    ) -> ESResult<(), JpreError> {
+        let contents = Self::read_config()?.0;
+        let mut config = toml_edit::DocumentMut::from_str(&contents)
+            .change_context(JpreError::Unexpected)
+            .attach_printable_lazy(|| {
+                format!("Could not parse config file at {:?}", *CONFIG_PATH)
+            })?;
+        editor(&mut config);
+
+        // Ensure whatever is in the config is valid, and update ourselves to it.
+        *self = toml::from_str::<JpreConfig>(&config.to_string())
+            .unwrap_or_else(|e| panic!("Edited config is invalid: {}", e));
+
+        std::fs::write(&*CONFIG_PATH, config.to_string())
+            .change_context(JpreError::Unexpected)
+            .attach_printable_lazy(|| {
+                format!("Could not write config file at {:?}", *CONFIG_PATH)
             })?;
         Ok(())
     }

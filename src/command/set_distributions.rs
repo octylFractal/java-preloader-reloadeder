@@ -55,12 +55,17 @@ impl JpreCommand for SetDistributions {
                     ),
                 }));
         }
-        context.config.distributions = self.distributions.clone();
-        context
-            .config
-            .save()
-            .change_context(JpreError::Unexpected)
-            .attach_printable("Failed to save config")?;
+
+        context.config.edit_config(|doc| {
+            let mut distributions = toml_edit::Array::new();
+            for distribution in &self.distributions {
+                distributions.push(toml_edit::Value::from(distribution));
+            }
+            distributions.fmt();
+
+            doc["distributions"] = toml_edit::value(distributions);
+        })?;
+
         eprintln!("Distribution(s) set to '{}'", self.distributions.join(", "));
         Ok(())
     }

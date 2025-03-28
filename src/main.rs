@@ -130,8 +130,6 @@ fn main_with_result() -> ESResult<(), JpreError> {
     }
 
     let config = JpreConfig::load()?;
-    // re-save config to ensure it's up-to-date
-    config.save()?;
 
     let context = Context {
         config: config.clone(),
