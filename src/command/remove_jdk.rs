@@ -19,10 +19,10 @@ impl JpreCommand for RemoveJdk {
         let path = JDK_MANAGER
             .get_jdk_path(&context.config, &self.jdk)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| format!("Failed to get path for JDK {}", self.jdk))?;
+            .attach_with(|| format!("Failed to get path for JDK {}", self.jdk))?;
         std::fs::remove_dir_all(&path)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| format!("Failed to remove JDK at {}", path.display()))?;
+            .attach_with(|| format!("Failed to remove JDK at {}", path.display()))?;
         eprintln!(
             "Removed JDK {}",
             self.jdk

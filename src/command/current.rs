@@ -18,11 +18,11 @@ impl JpreCommand for Current {
         }
         let link_target = std::fs::read_link(&path)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| format!("Failed to read link target of {:?}", path))?;
+            .attach_with(|| format!("Failed to read link target of {:?}", path))?;
         let full_version = JDK_MANAGER
             .get_full_version_from_path(&link_target)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| format!("Failed to get full version of {:?}", link_target))?;
+            .attach_with(|| format!("Failed to get full version of {:?}", link_target))?;
 
         println!(
             "{}",

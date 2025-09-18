@@ -15,7 +15,7 @@ impl JpreCommand for ListInstalled {
         let mut installed = JDK_MANAGER
             .get_installed_jdks()
             .change_context(JpreError::Unexpected)
-            .attach_printable("Failed to get installed JDKs")?;
+            .attach("Failed to get installed JDKs")?;
 
         installed.sort();
 
@@ -24,7 +24,7 @@ impl JpreCommand for ListInstalled {
             let full = JDK_MANAGER
                 .get_full_version(&jdk)
                 .change_context(JpreError::Unexpected)
-                .attach_printable_lazy(|| format!("Failed to get full version for JDK {}", jdk))?;
+                .attach_with(|| format!("Failed to get full version for JDK {}", jdk))?;
             println!(
                 "- {} (full: {})",
                 jdk.if_supports_color(Stream::Stdout, |s| s.color(jdk_color())),

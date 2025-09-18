@@ -37,7 +37,7 @@ impl JpreCommand for SetDefault {
         JDK_MANAGER
             .get_jdk_path(&context.config, &self.jdk)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| format!("Failed to get path for JDK {}", self.jdk))?;
+            .attach_with(|| format!("Failed to get path for JDK {}", self.jdk))?;
 
         context.config.edit_config(|doc| {
             doc["default_jdk"] = toml_edit::value(self.jdk.to_string());

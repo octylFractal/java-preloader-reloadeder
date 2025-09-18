@@ -29,7 +29,7 @@ impl JpreCommand for JavaHome {
             Ok(())
         })()
         .change_context(JpreError::Unexpected)
-        .attach_printable("Failed to write Java home path to stderr")?;
+        .attach("Failed to write Java home path to stderr")?;
 
         Ok(())
     }

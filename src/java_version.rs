@@ -4,16 +4,17 @@ use crate::error::ESResult;
 use crate::java_version::key::VersionKey;
 use crate::string::SplittingExt;
 use derive_more::Display;
-use error_stack::{Context, Report, ResultExt};
+use error_stack::{Report, ResultExt};
 use serde::Deserialize;
 use std::cmp::Ordering;
+use std::error::Error;
 use std::fmt::Display;
 use std::str::{FromStr, Split};
 
 #[derive(Debug, Display)]
 pub struct JavaVersionParsingError;
 
-impl Context for JavaVersionParsingError {}
+impl Error for JavaVersionParsingError {}
 
 /// Represents a Java version. Parsing is not strict, and some invalid versions may be accepted.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -236,8 +237,8 @@ impl FromStr for JavaVersion {
 fn parse_numeric_part(v: &str, name: &str) -> ESResult<u32, JavaVersionParsingError> {
     v.parse::<u32>()
         .change_context(JavaVersionParsingError)
-        .attach_printable_lazy(|| format!("Failed to parse {}", name))
-        .attach_printable_lazy(|| format!("value: {}", v))
+        .attach_with(|| format!("Failed to parse {}", name))
+        .attach_with(|| format!("value: {}", v))
 }
 
 fn old_scheme(
@@ -245,19 +246,19 @@ fn old_scheme(
     extra: Option<&str>,
 ) -> Result<JavaVersion, Report<JavaVersionParsingError>> {
     let minor = parse_numeric_part(
-        dot_parts.next().ok_or_else(|| {
-            Report::new(JavaVersionParsingError).attach_printable("Missing minor version")
-        })?,
+        dot_parts
+            .next()
+            .ok_or_else(|| Report::new(JavaVersionParsingError).attach("Missing minor version"))?,
         "minor",
     )?;
     let patch = parse_numeric_part(
-        dot_parts.next().ok_or_else(|| {
-            Report::new(JavaVersionParsingError).attach_printable("Missing patch version")
-        })?,
+        dot_parts
+            .next()
+            .ok_or_else(|| Report::new(JavaVersionParsingError).attach("Missing patch version"))?,
         "patch",
     )?;
     if dot_parts.next().is_some() {
-        return Err(Report::new(JavaVersionParsingError).attach_printable("Too many version parts"));
+        return Err(Report::new(JavaVersionParsingError).attach("Too many version parts"));
     }
     let (update, build) = parse_old_scheme_extra(extra)?;
 
@@ -288,8 +289,9 @@ fn parse_old_scheme_extra(
         build
             .map(|s| {
                 if !s.starts_with('b') {
-                    return Err(Report::new(JavaVersionParsingError)
-                        .attach_printable("Build must start with 'b'"));
+                    return Err(
+                        Report::new(JavaVersionParsingError).attach("Build must start with 'b'")
+                    );
                 }
                 let numeric = s.strip_prefix("b0").unwrap_or(&s[1..]);
                 parse_numeric_part(numeric, "build")
@@ -304,20 +306,16 @@ fn new_scheme(
     extra: Option<&str>,
 ) -> Result<JavaVersion, Report<JavaVersionParsingError>> {
     if !first.chars().all(|c| c.is_ascii_digit()) {
-        return Err(
-            Report::new(JavaVersionParsingError).attach_printable("First part is not numeric")
-        );
+        return Err(Report::new(JavaVersionParsingError).attach("First part is not numeric"));
     }
     if first.starts_with('0') {
-        return Err(
-            Report::new(JavaVersionParsingError).attach_printable("First part cannot start with 0")
-        );
+        return Err(Report::new(JavaVersionParsingError).attach("First part cannot start with 0"));
     }
     let feature = parse_numeric_part(first, "feature")?;
     let remaining_dot_parts = dot_parts.collect::<Vec<_>>();
     let last_part = remaining_dot_parts.last();
     if last_part == Some(&"0") {
-        return Err(Report::new(JavaVersionParsingError).attach_printable("Last part cannot be 0"));
+        return Err(Report::new(JavaVersionParsingError).attach("Last part cannot be 0"));
     }
 
     fn parse_opt_vnum_part(v: Option<&str>, name: &str) -> ESResult<u32, JavaVersionParsingError> {
@@ -373,8 +371,9 @@ fn parse_new_scheme_extra(
         let (pre, build) = pre_maybe_build.split_optional('+');
         (Some(pre), build, opt)
     } else {
-        return Err(Report::new(JavaVersionParsingError)
-            .attach_printable("Extra data must start with + or -"));
+        return Err(
+            Report::new(JavaVersionParsingError).attach("Extra data must start with + or -")
+        );
     };
     Ok((
         pre_s

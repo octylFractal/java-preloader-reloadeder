@@ -19,7 +19,7 @@ impl JpreCommand for ListDistributions {
             FOOJAY_API
                 .list_distributions()
                 .change_context(JpreError::Unexpected)
-                .attach_printable("Failed to list distributions")?,
+                .attach("Failed to list distributions")?,
         );
         distributions.sort();
         for distribution in distributions {

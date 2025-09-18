@@ -48,15 +48,17 @@ impl JpreCommand for UpdateInstalled {
         let mut installed = JDK_MANAGER
             .get_installed_jdks()
             .change_context(JpreError::Unexpected)
-            .attach_printable("Failed to get installed JDKs")?;
+            .attach("Failed to get installed JDKs")?;
 
         let retain_fn: Box<dyn Fn(&VersionKey) -> bool> = match self.target {
             UpdateTarget::All => Box::new(|_| true),
             UpdateTarget::Default => {
                 let Some(default) = context.config.default_jdk.clone() else {
-                    return Err(Report::new(JpreError::UserError).attach(UserMessage {
-                        message: "No default JDK set".to_string(),
-                    }));
+                    return Err(
+                        Report::new(JpreError::UserError).attach_opaque(UserMessage {
+                            message: "No default JDK set".to_string(),
+                        }),
+                    );
                 };
                 Box::new(move |jdk| jdk == &default)
             }
@@ -84,7 +86,7 @@ impl JpreCommand for UpdateInstalled {
                 let latest_info_result = FOOJAY_API
                     .get_latest_package_info_using_priority(&context.config, &jdk)
                     .change_context(JpreError::Unexpected)
-                    .attach_printable("Failed to get latest package info");
+                    .attach("Failed to get latest package info");
                 let (list_info, _) = match latest_info_result {
                     Ok(info) => info,
                     Err(err) => {
@@ -125,7 +127,7 @@ impl UpdateInstalled {
         JDK_MANAGER
             .download_jdk(&context.config, jdk)
             .change_context(JpreError::Unexpected)
-            .attach_printable("Failed to update JDK")?;
+            .attach("Failed to update JDK")?;
         Ok(())
     }
 }

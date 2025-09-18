@@ -11,34 +11,34 @@ repository = "https://github.com/octylFractal/java-preloader-reloadeder"
 edition = "2021"
 
 [dependencies]
-error-stack = "0.5.0"
+error-stack = "0.6.0"
 digest = "0.10.7"
-sha2 = "0.10.8"
+sha2 = "0.10.9"
 directories = "6.0.0"
 tracing = "0.1.41"
-toml = "0.8.20"
-toml_edit = "0.22.24"
+toml = "0.9.6"
+toml_edit = "0.23.5"
 itertools = "0.14.0"
-thiserror = "2.0.12"
-console = "0.15.11"
-indicatif = "0.17.11"
+thiserror = "2.0.16"
+console = "0.16.1"
+indicatif = "0.18.0"
 hex = "0.4.3"
-tempfile = "3.19.1"
+tempfile = "3.22.0"
 tar = "0.4.44"
-flate2 = "1.1.0"
-zip = "2.5.0"
+flate2 = "1.1.2"
+zip = "5.1.1"
 enum_dispatch = "0.3.13"
 
 [dependencies.url]
-version = "2.5.4"
+version = "2.5.7"
 features = ["serde"]
 
 [dependencies.ureq]
-version = "3.0.10"
+version = "3.1.2"
 features = ["json"]
 
 [dependencies.owo-colors]
-version = "4.2.0"
+version = "4.2.2"
 features = ["supports-colors"]
 
 [dependencies.derive_more]
@@ -46,15 +46,16 @@ version = "2.0.1"
 features = ["full"]
 
 [dependencies.clap]
-version = "4.5.34"
+version = "4.5.47"
 features = ["derive"]
 
 [dependencies.serde]
-version = "1.0.219"
+version = "1.0.225"
 features = ["derive"]
 
 [dependencies.tracing-subscriber]
-version = "0.3.19"
+# Force 0.3.19 because of https://github.com/tokio-rs/tracing/issues/3369
+version = "=0.3.19"
 features = ["env-filter"]
 
 # Optimize dependencies in dev

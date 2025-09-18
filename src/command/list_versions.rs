@@ -38,14 +38,14 @@ impl JpreCommand for ListVersions {
             {
                 return Err(err
                     .change_context(JpreError::UserError)
-                    .attach(UserMessage {
+                    .attach_opaque(UserMessage {
                         message: format!("Distribution '{}' not found", distribution),
                     }));
             }
             Err(err) => {
                 return Err(err
                     .change_context(JpreError::Unexpected)
-                    .attach_printable("Failed to list versions"))
+                    .attach("Failed to list versions"))
             }
         };
         major_versions.sort();

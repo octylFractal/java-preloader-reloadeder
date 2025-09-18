@@ -14,7 +14,7 @@ pub fn clear_context_path() -> ESResult<(), JpreError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| format!("Failed to remove Java home path file '{:?}'", path)),
+            .attach_with(|| format!("Failed to remove Java home path file '{:?}'", path)),
     }
 }
 
@@ -26,15 +26,13 @@ pub fn set_context_path_to_java_home(
     let jdk = JDK_MANAGER
         .get_jdk_path(&context.config, jdk)
         .change_context(JpreError::Unexpected)
-        .attach_printable_lazy(|| format!("Failed to get path for JDK {}", jdk))?;
+        .attach_with(|| format!("Failed to get path for JDK {}", jdk))?;
     let path = get_context_path();
     let parent = path.parent().unwrap();
     debug!("Creating directories to '{}'", parent.display());
     std::fs::create_dir_all(parent)
         .change_context(JpreError::Unexpected)
-        .attach_printable_lazy(|| {
-            format!("Failed to create directories to {}", parent.display())
-        })?;
+        .attach_with(|| format!("Failed to create directories to {}", parent.display()))?;
     clear_context_path()?;
     debug!(
         "Creating symlink from '{}' to '{}'",
@@ -43,7 +41,7 @@ pub fn set_context_path_to_java_home(
     );
     std::os::unix::fs::symlink(&jdk, &path)
         .change_context(JpreError::Unexpected)
-        .attach_printable_lazy(|| {
+        .attach_with(|| {
             format!(
                 "Failed to create symlink from {} to {}",
                 jdk.display(),

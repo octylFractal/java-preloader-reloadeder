@@ -40,7 +40,7 @@ impl JpreCommand for UseJdk {
     fn run(self, context: Context) -> ESResult<(), JpreError> {
         let jdk = match self.jdk {
             UseTarget::Default => context.config.default_jdk.clone().ok_or_else(|| {
-                Report::new(JpreError::UserError).attach(UserMessage {
+                Report::new(JpreError::UserError).attach_opaque(UserMessage {
                     message: "No default JDK set".to_string(),
                 })
             })?,

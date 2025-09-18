@@ -1,7 +1,8 @@
 use derive_more::Display;
-use error_stack::Context;
+use error_stack::Report;
+use std::error::Error;
 
-pub type ESResult<T, E> = error_stack::Result<T, E>;
+pub type ESResult<T, E> = Result<T, Report<E>>;
 
 #[derive(Debug, Display)]
 pub enum JpreError {
@@ -13,7 +14,7 @@ pub enum JpreError {
     Unexpected,
 }
 
-impl Context for JpreError {}
+impl Error for JpreError {}
 
 /// Message for the user. Attached when the error is a [`JpreError::UserError`].
 #[derive(Debug)]

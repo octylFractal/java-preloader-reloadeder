@@ -30,7 +30,7 @@ impl JpreCommand for SetDistributions {
         let distributions = FOOJAY_API
             .list_distributions()
             .change_context(JpreError::Unexpected)
-            .attach_printable("Failed to list distributions")?;
+            .attach("Failed to list distributions")?;
         let all_names = distributions
             .iter()
             .flat_map(|i| &i.synonyms)
@@ -45,10 +45,10 @@ impl JpreCommand for SetDistributions {
         if !missing_names.is_empty() {
             missing_names.sort();
             return Err(Report::new(JpreError::UserError)
-                .attach(UserMessage {
+                .attach_opaque(UserMessage {
                     message: format!("Distribution(s) '{}' not found", missing_names.join(", ")),
                 })
-                .attach(UserMessage {
+                .attach_opaque(UserMessage {
                     message: format!(
                         "Available distributions: {}",
                         distributions.into_iter().map(|i| i.name).join(", ")

@@ -4,10 +4,11 @@ use crate::http_client::new_http_client;
 use crate::java_version::key::VersionKey;
 use crate::java_version::{JavaVersion, PreRelease};
 use derive_more::Display;
-use error_stack::{Context, Report, ResultExt};
+use error_stack::{Report, ResultExt};
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::error::Error;
 use std::sync::LazyLock;
 use tracing::debug;
 use url::Url;
@@ -22,7 +23,7 @@ pub enum FoojayDiscoApiError {
     InvalidDistribution,
 }
 
-impl Context for FoojayDiscoApiError {}
+impl Error for FoojayDiscoApiError {}
 
 pub static FOOJAY_API: LazyLock<FoojayDiscoApi> = LazyLock::new(FoojayDiscoApi::new);
 
@@ -92,7 +93,7 @@ impl FoojayDiscoApi {
         .unwrap();
         Ok(self
             .call_foojay_api_single::<FoojayDistributionInfo>(url)
-            .attach_printable_lazy(|| format!("Distribution: {}", distribution))?
+            .attach_with(|| format!("Distribution: {}", distribution))?
             .versions
             .into_iter()
             .map(|v| v.into())
@@ -103,7 +104,7 @@ impl FoojayDiscoApi {
         &self,
         config: &JpreConfig,
         jdk: &VersionKey,
-    ) -> ESResult<(FoojayPackageListInfo, FoojayPackageInfo), FoojayDiscoApiError> {
+    ) -> ESResult<(FoojayPackageListInfo, FoojayPackageInfo), [FoojayDiscoApiError]> {
         let mut iter = config
             .distributions
             .iter()
@@ -120,9 +121,10 @@ impl FoojayDiscoApi {
             }
         }
         let mut report = Report::new(FoojayDiscoApiError::Api)
-            .attach_printable("Failed to get latest package info");
+            .expand()
+            .attach("Failed to get latest package info");
         for error in errors {
-            report.extend_one(error);
+            report.push(error);
         }
         Err(report)
     }
@@ -190,7 +192,7 @@ impl FoojayDiscoApi {
                     .transpose()
             })
             .ok_or_else(|| {
-                Report::new(FoojayDiscoApiError::Api).attach_printable(format!(
+                Report::new(FoojayDiscoApiError::Api).attach(format!(
                     "No latest package available for JDK {} in distribution {}",
                     jdk, distribution
                 ))
@@ -220,8 +222,8 @@ impl FoojayDiscoApi {
                     Err(Report::new(FoojayDiscoApiError::InvalidDistribution))
                 }
                 _ => Err(Report::new(FoojayDiscoApiError::Api)
-                    .attach_printable(format!("Unknown message: {}", data.message)))
-                .attach_printable(format!("Status code: {}", status_code)),
+                    .attach(format!("Unknown message: {}", data.message))
+                    .attach(format!("Status code: {}", status_code))),
             }
         }
     }

@@ -41,7 +41,7 @@ impl JpreConfig {
     pub(super) fn load() -> ESResult<JpreConfig, JpreError> {
         std::fs::create_dir_all(CONFIG_PATH.parent().unwrap())
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| {
+            .attach_with(|| {
                 format!(
                     "Could not create config directory at {:?}",
                     PROJECT_DIRS.config_dir()
@@ -52,9 +52,7 @@ impl JpreConfig {
             .append(true)
             .open(&*CONFIG_PATH)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| {
-                format!("Could not open config file at {:?}", *CONFIG_PATH)
-            })?;
+            .attach_with(|| format!("Could not open config file at {:?}", *CONFIG_PATH))?;
         let (contents, config) = Self::read_config()?;
         match config {
             Ok(mut config) => {
@@ -63,7 +61,7 @@ impl JpreConfig {
                     config.distribution = None;
                 }
                 if config.distributions.is_empty() {
-                    return Err(JpreError::UserError).attach(UserMessage {
+                    return Err(JpreError::UserError).attach_opaque(UserMessage {
                         message: "No distributions set in config".to_string(),
                     });
                 }
@@ -74,7 +72,7 @@ impl JpreConfig {
                 let Ok(old_config) = toml::from_str::<toml::Table>(&contents) else {
                     return Err(e)
                         .change_context(JpreError::Unexpected)
-                        .attach_printable_lazy(|| {
+                        .attach_with(|| {
                             format!("Could not parse config file at {:?}", *CONFIG_PATH)
                         });
                 };
@@ -82,7 +80,7 @@ impl JpreConfig {
                     if old_config.keys().len() != 1 {
                         return Err(e)
                             .change_context(JpreError::Unexpected)
-                            .attach_printable_lazy(|| {
+                            .attach_with(|| {
                                 format!("Could not parse config file at {:?}", *CONFIG_PATH)
                             });
                     }
@@ -105,22 +103,20 @@ impl JpreConfig {
 
                     std::fs::write(&*CONFIG_PATH, new_config.to_string())
                         .change_context(JpreError::Unexpected)
-                        .attach_printable_lazy(|| {
+                        .attach_with(|| {
                             format!("Could not write config file at {:?}", *CONFIG_PATH)
                         })?;
 
                     return Self::read_config()?
                         .1
                         .change_context(JpreError::Unexpected)
-                        .attach_printable_lazy(|| {
+                        .attach_with(|| {
                             format!("Could not parse config file at {:?}", *CONFIG_PATH)
                         });
                 }
                 Err(e)
                     .change_context(JpreError::Unexpected)
-                    .attach_printable_lazy(|| {
-                        format!("Could not parse config file at {:?}", *CONFIG_PATH)
-                    })
+                    .attach_with(|| format!("Could not parse config file at {:?}", *CONFIG_PATH))
             }
         }
     }
@@ -128,9 +124,7 @@ impl JpreConfig {
     fn read_config() -> ESResult<(String, Result<JpreConfig, Error>), JpreError> {
         let contents = std::fs::read_to_string(&*CONFIG_PATH)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| {
-                format!("Could not read config file at {:?}", *CONFIG_PATH)
-            })?;
+            .attach_with(|| format!("Could not read config file at {:?}", *CONFIG_PATH))?;
         let config = toml::from_str::<JpreConfig>(&contents);
         Ok((contents, config))
     }
@@ -142,9 +136,7 @@ impl JpreConfig {
         let contents = Self::read_config()?.0;
         let mut config = toml_edit::DocumentMut::from_str(&contents)
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| {
-                format!("Could not parse config file at {:?}", *CONFIG_PATH)
-            })?;
+            .attach_with(|| format!("Could not parse config file at {:?}", *CONFIG_PATH))?;
         editor(&mut config);
 
         // Ensure whatever is in the config is valid, and update ourselves to it.
@@ -153,9 +145,7 @@ impl JpreConfig {
 
         std::fs::write(&*CONFIG_PATH, config.to_string())
             .change_context(JpreError::Unexpected)
-            .attach_printable_lazy(|| {
-                format!("Could not write config file at {:?}", *CONFIG_PATH)
-            })?;
+            .attach_with(|| format!("Could not write config file at {:?}", *CONFIG_PATH))?;
         Ok(())
     }
 }
