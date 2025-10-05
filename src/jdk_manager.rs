@@ -13,9 +13,11 @@ use digest::Digest;
 use error_stack::{Report, ResultExt};
 use indicatif::MultiProgress;
 use owo_colors::{OwoColorize, Stream};
+use std::cmp::Reverse;
 use std::error::Error;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -356,6 +358,7 @@ impl JdkManager {
                         download_path
                     )
                 })?;
+                let mut files_by_unix_mode = Vec::new();
                 for i in 0..archive.len() {
                     let mut file = archive.by_index(i).unwrap();
                     let Some(rel_unpack_target) = file.enclosed_name() else {
@@ -447,6 +450,25 @@ impl JdkManager {
                             format!(
                                 "Could not write extracted JDK file to {:?}",
                                 abs_unpack_target
+                            )
+                        })?;
+                    if let Some(mode) = file.unix_mode() {
+                        files_by_unix_mode.push((abs_unpack_target.clone(), mode));
+                    }
+                }
+
+                // Copied from zip crate's extract function, which is unfortunately private.
+                if files_by_unix_mode.len() > 1 {
+                    // Ensure we update children's permissions before making a parent unwritable
+                    files_by_unix_mode.sort_by_key(|(path, _)| Reverse(path.clone()));
+                }
+                for (path, mode) in files_by_unix_mode.into_iter() {
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                        .change_context(JdkManagerError)
+                        .attach_with(|| {
+                            format!(
+                                "Could not set permissions for extracted JDK file at {:?}",
+                                path
                             )
                         })?;
                 }
