@@ -39,11 +39,11 @@ fn detected_foojay_arch() -> &'static str {
     }
 }
 
-fn detected_foojay_os() -> &'static str {
+fn detected_foojay_os(libc: &str) -> &'static str {
     match std::env::consts::OS {
         "macos" => "macos",
         "linux" => {
-            if cfg!(target_env = "musl") {
+            if libc == "musl" {
                 "linux-musl"
             } else {
                 "linux"
@@ -139,10 +139,11 @@ impl FoojayDiscoApi {
             .forced_architecture
             .clone()
             .unwrap_or_else(|| detected_foojay_arch().to_string());
+        let libc = config.forced_libc.clone();
         let os = config
             .forced_os
             .clone()
-            .unwrap_or_else(|| detected_foojay_os().to_string());
+            .unwrap_or_else(|| detected_foojay_os(&libc).to_string());
         let url = Url::parse_with_params(
             &format!("{}/packages", FOOJAY_BASE_URL),
             &[
@@ -164,6 +165,7 @@ impl FoojayDiscoApi {
                 ("distribution", distribution.to_string()),
                 ("operating_system", os),
                 ("architecture", arch),
+                ("libc_type", libc.clone()),
             ],
         )
         .unwrap();

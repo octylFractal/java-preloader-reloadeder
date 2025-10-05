@@ -35,6 +35,18 @@ pub struct JpreConfig {
     /// mapped.
     #[serde(default)]
     pub forced_os: Option<String>,
+    /// libc to force when downloading a JDK. If not set, "glibc" will be used.
+    /// This is only relevant on Linux.
+    #[serde(default = "default_libc")]
+    pub forced_libc: String,
+}
+
+fn default_distribution() -> Vec<String> {
+    vec!["temurin".to_string()]
+}
+
+fn default_libc() -> String {
+    "glibc".to_string()
 }
 
 impl JpreConfig {
@@ -148,8 +160,4 @@ impl JpreConfig {
             .attach_with(|| format!("Could not write config file at {:?}", *CONFIG_PATH))?;
         Ok(())
     }
-}
-
-fn default_distribution() -> Vec<String> {
-    vec!["temurin".to_string()]
 }

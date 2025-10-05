@@ -18,6 +18,9 @@ pub struct UpdateInstalled {
     check: bool,
     /// The JDK to update. Version key, 'all', or 'default'.
     target: UpdateTarget,
+    /// Force update even if the version is the same.
+    #[clap(short, long)]
+    force: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -95,19 +98,24 @@ impl JpreCommand for UpdateInstalled {
                     }
                 };
                 let latest = list_info.java_version;
-                if latest.compare(&full_version) == std::cmp::Ordering::Greater {
+                let do_update = if latest.compare(&full_version) == std::cmp::Ordering::Greater {
                     eprintln!(
                         "  New version available: {}",
                         latest.if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
                     );
-                    if !self.check {
-                        Self::update_jdk(&context, &jdk)?;
-                    }
+                    true
                 } else {
                     eprintln!(
                         "  Already up-to-date: {}",
                         full_version.if_supports_color(Stream::Stderr, |s| s.color(jdk_color()))
                     );
+                    if self.force {
+                        eprintln!("  Forcing re-install...");
+                    }
+                    self.force
+                };
+                if do_update && !self.check {
+                    Self::update_jdk(&context, &jdk)?;
                 }
             } else {
                 warn!("No full version found for {}", jdk);
