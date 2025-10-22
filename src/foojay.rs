@@ -144,9 +144,8 @@ impl FoojayDiscoApi {
             .forced_os
             .clone()
             .unwrap_or_else(|| detected_foojay_os(&libc).to_string());
-        let url = Url::parse_with_params(
-            &format!("{}/packages", FOOJAY_BASE_URL),
-            &[
+        let url = {
+            let mut params = vec![
                 // We don't want to handle JREs yet.
                 ("package_type", "jdk".to_string()),
                 // JavaFX can be nice to have bundled.
@@ -163,12 +162,15 @@ impl FoojayDiscoApi {
                     },
                 ),
                 ("distribution", distribution.to_string()),
-                ("operating_system", os),
+                ("operating_system", os.clone()),
                 ("architecture", arch),
-                ("libc_type", libc.clone()),
-            ],
-        )
-        .unwrap();
+            ];
+            if os == "linux" || os == "linux-musl" {
+                params.push(("libc_type", libc.clone()));
+            }
+
+            Url::parse_with_params(&format!("{}/packages", FOOJAY_BASE_URL), &params).unwrap()
+        };
         self.call_foojay_api::<FoojayPackageListInfo>(url)?
             .into_iter()
             .find_map(|p| -> Option<ESResult<_, FoojayDiscoApiError>> {
