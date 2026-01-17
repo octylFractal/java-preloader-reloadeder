@@ -1,5 +1,12 @@
 use digest::{Digest, DynDigest};
 use std::io::Write;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ChecksumVerifierError {
+    #[error("Checksum mismatch: expected {expected}, got {actual}")]
+    ChecksumMismatch { expected: String, actual: String },
+}
 
 pub struct ChecksumVerifier<T, W> {
     checksum: Box<[u8]>,
@@ -28,8 +35,17 @@ impl<T: DynDigest, W: Write> ChecksumVerifier<T, W> {
         }
     }
 
-    pub fn verify(self) -> bool {
-        self.checksummer.finalize() == self.checksum
+    pub fn verify(self) -> Result<(), ChecksumVerifierError> {
+        let actual = self.checksummer.finalize();
+        let expected = self.checksum;
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(ChecksumVerifierError::ChecksumMismatch {
+                expected: hex::encode(expected),
+                actual: hex::encode(actual),
+            })
+        }
     }
 }
 

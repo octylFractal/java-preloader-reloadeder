@@ -5,6 +5,7 @@ use crate::java_version::key::VersionKey;
 use crate::java_version::{JavaVersion, PreRelease};
 use derive_more::Display;
 use error_stack::{Report, ResultExt};
+use itertools::Itertools;
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -148,8 +149,6 @@ impl FoojayDiscoApi {
             let mut params = vec![
                 // We don't want to handle JREs yet.
                 ("package_type", "jdk".to_string()),
-                // JavaFX can be nice to have bundled.
-                ("with_javafx_if_available", "true".to_string()),
                 // We need to be able to download it.
                 ("directly_downloadable", "true".to_string()),
                 ("jdk_version", jdk.major.to_string()),
@@ -173,21 +172,29 @@ impl FoojayDiscoApi {
         };
         self.call_foojay_api::<FoojayPackageListInfo>(url)?
             .into_iter()
+            .sorted_by(|a, b|
+                // Reverse comparison to get the latest version first.
+                a.java_version.compare(&b.java_version).reverse())
             .find_map(|p| -> Option<ESResult<_, FoojayDiscoApiError>> {
-                if !p.latest_build_available {
-                    return None;
-                }
                 if let ArchiveType::Unknown(archive_type) = &p.archive_type {
-                    debug!("Unknown archive type: {}", archive_type);
+                    debug!(
+                        "Rejecting package {} because of unknown archive type: {}",
+                        p.okay_identification(),
+                        archive_type
+                    );
                     return None;
                 }
                 self.call_foojay_api_single(p.links.pkg_info_uri.clone())
                     .map(|mut info: FoojayPackageInfo| {
-                        if matches!(info.checksum_type, ChecksumType::Unknown(ref ct) if ct.is_empty()) {
-                            try_fill_checksum(&mut info);
-                        }
+                        // Ignore any existing checksum, always fill from URL if possible,
+                        // since some packages have incorrect checksums.
+                        try_set_checksum(&mut info);
                         if let ChecksumType::Unknown(checksum_type) = &info.checksum_type {
-                            debug!("Unknown checksum type: {}", checksum_type);
+                            debug!(
+                                "Rejecting package {} because of unknown checksum type: {}",
+                                p.okay_identification(),
+                                checksum_type
+                            );
                             None
                         } else {
                             Some((p, info))
@@ -242,10 +249,11 @@ impl FoojayDiscoApi {
     }
 }
 
-/// Attempt to fill in the missing checksum data using known checksum URL patterns.
-fn try_fill_checksum(info: &mut FoojayPackageInfo) {
-    for suffix in &["sha256", "sha256.text"] {
+/// Attempt to set checksum data using known checksum URL patterns.
+fn try_set_checksum(info: &mut FoojayPackageInfo) {
+    for suffix in &["sha256", "sha256.txt"] {
         let url = format!("{}.{}", info.direct_download_uri, suffix);
+        debug!("Attempting to fetch checksum from URL: {}", url);
         let Ok(response) = ureq::get(&url).call() else {
             continue;
         };
@@ -255,7 +263,11 @@ fn try_fill_checksum(info: &mut FoojayPackageInfo) {
         let Ok(checksum) = response.into_body().read_to_string() else {
             continue;
         };
-        let checksum = checksum.trim();
+        let checksum = checksum
+            .trim()
+            .split(' ')
+            .next()
+            .expect("always at least one part");
         if checksum.len() == 64 {
             info.checksum = checksum.to_string();
             info.checksum_type = ChecksumType::Sha256;
@@ -303,10 +315,19 @@ struct FoojayDistributionInfo {
 
 #[derive(Debug, Deserialize)]
 pub struct FoojayPackageListInfo {
+    pub distribution: String,
     pub archive_type: ArchiveType,
     pub java_version: JavaVersion,
-    pub latest_build_available: bool,
     pub links: FoojayPackageLinks,
+}
+
+impl FoojayPackageListInfo {
+    pub fn okay_identification(&self) -> String {
+        format!(
+            "{} {} ({})",
+            self.distribution, self.java_version, self.links.pkg_info_uri
+        )
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

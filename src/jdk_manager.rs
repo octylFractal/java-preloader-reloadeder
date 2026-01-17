@@ -128,15 +128,6 @@ impl JdkManager {
         config: &JpreConfig,
         jdk: &VersionKey,
     ) -> ESResult<(), JdkManagerError> {
-        let path = jdk_path(jdk);
-        if path.exists() {
-            std::fs::remove_dir_all(&path)
-                .change_context(JdkManagerError)
-                .attach_with(|| format!("Could not remove JDK install folder at {:?}", path))?;
-        }
-        std::fs::create_dir_all(&path)
-            .change_context(JdkManagerError)
-            .attach_with(|| format!("Could not create directory for JDK at {:?}", path))?;
         let (list_info, info) = FOOJAY_API
             .get_latest_package_info_using_priority(config, jdk)
             .change_context(JdkManagerError)
@@ -166,7 +157,7 @@ impl JdkManager {
             .attach_with(|| {
                 format!(
                     "Could not create temporary file for JDK download in {:?}",
-                    path
+                    JDK_DOWNLOADS_PATH
                 )
             })?
             .into_temp_path();
@@ -198,6 +189,12 @@ impl JdkManager {
             }
         };
 
+        let path = jdk_path(jdk);
+        if path.exists() {
+            std::fs::remove_dir_all(&path)
+                .change_context(JdkManagerError)
+                .attach_with(|| format!("Could not remove JDK install folder at {:?}", path))?;
+        }
         if let Err(e) = std::fs::rename(&root, &path)
             .change_context(JdkManagerError)
             .attach_with(|| format!("Could not move JDK from {:?} to {:?}", root, path))
@@ -280,9 +277,10 @@ impl JdkManager {
         )
         .change_context(JdkManagerError)
         .attach_with(|| format!("Could not write JDK package to {:?}", download_path))?;
-        if !checksum_verifier.verify() {
-            return Err(Report::new(JdkManagerError)
-                .attach(format!("Checksum failed for {}", info.direct_download_uri)));
+        if let Err(e) = checksum_verifier.verify() {
+            return Err(e)
+                .change_context(JdkManagerError)
+                .attach(format!("Checksum failed for {}", info.direct_download_uri));
         }
         progress_bar.abandon_with_message(
             format!("Downloaded JDK {} archive", list_info.java_version)
