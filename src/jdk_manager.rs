@@ -171,6 +171,14 @@ impl JdkManager {
             }
             return Err(e);
         }
+        std::fs::create_dir_all(&*JDK_STORE_PATH)
+            .change_context(JdkManagerError)
+            .attach_with(|| {
+                format!(
+                    "Could not create JDK store directory at {:?}",
+                    JDK_STORE_PATH
+                )
+            })?;
         let unpack_dir = tempfile::tempdir_in(&*JDK_STORE_PATH)
             .change_context(JdkManagerError)
             .attach("Could not create temporary directory for JDK unpacking")?;
